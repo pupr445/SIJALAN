@@ -84,6 +84,26 @@ const KONDISI_LABEL = {baik:'Baik', sedang:'Sedang', rusak_ringan:'Rusak Ringan'
 const KONDISI_ORDER = ['rusak_berat','rusak_ringan','sedang','baik'];
 const KONDISI_COLOR = {baik:'#2E8B57', sedang:'#E8A33D', rusak_ringan:'#E0672B', rusak_berat:'#C43D3D'};
 const ROLE_LABEL = {admin:'Administrator', kepala_bidang:'Kepala Bidang', petugas_lapangan:'Petugas Lapangan', viewer:'Peninjau'};
+const JENIS_PENANGANAN_LABEL = {pemeliharaan_rutin:'Pemeliharaan Rutin', pemeliharaan_berkala:'Pemeliharaan Berkala', rehabilitasi:'Rehabilitasi', peningkatan:'Peningkatan', pembangunan_baru:'Pembangunan Baru', tanggap_darurat:'Tanggap Darurat'};
+const KATEGORI_RUANG_LABEL = {rumija:'Rumija', rumaja:'Rumaja', ruwasja:'Ruwasja'};
+const SATUAN_LABEL = {m:'m', m2:'m²', m3:'m³', unit:'unit', ls:'ls'};
+const REKOMENDASI_MAP = {baik:'Pemeliharaan Rutin', sedang:'Pemeliharaan Berkala', rusak_ringan:'Rehabilitasi', rusak_berat:'Peningkatan'};
+// Estimasi kondisi & rekomendasi dari salah satu nilai PCI/SDI/IKP.
+// PCI & IKP: 0-100, makin tinggi makin baik. SDI: makin rendah makin baik.
+function estimasiKondisi(pci, sdi, ikp){
+  let val=null, mode=null;
+  if(pci!==null && pci!==undefined && pci!==''){ val=Number(pci); mode='pci'; }
+  else if(ikp!==null && ikp!==undefined && ikp!==''){ val=Number(ikp); mode='ikp'; }
+  else if(sdi!==null && sdi!==undefined && sdi!==''){ val=Number(sdi); mode='sdi'; }
+  if(val===null || isNaN(val)) return null;
+  let kondisi;
+  if(mode==='sdi'){
+    if(val<=25) kondisi='baik'; else if(val<=50) kondisi='sedang'; else if(val<=100) kondisi='rusak_ringan'; else kondisi='rusak_berat';
+  } else {
+    if(val>=85) kondisi='baik'; else if(val>=70) kondisi='sedang'; else if(val>=55) kondisi='rusak_ringan'; else kondisi='rusak_berat';
+  }
+  return {kondisi, rekomendasi: REKOMENDASI_MAP[kondisi]};
+}
 
 function isEditor(){ return state.profile && ['admin','kepala_bidang','petugas_lapangan'].includes(state.profile.role); }
 function isAdmin(){ return state.profile && state.profile.role === 'admin'; }
@@ -127,6 +147,13 @@ const api = {
   async updateRole(id, role){ const {error} = await sb.from('profiles').update({role}).eq('id',id); if(error) throw error; },
   async insertRuas(payload){ const {error} = await sb.from('ruas_jalan').insert(payload); if(error) throw error; },
   async insertSurvei(payload){ const {error} = await sb.from('survei_kondisi').insert(payload); if(error) throw error; },
+  async subKegiatanRef(jenis){ const {data,error} = await sb.from('sub_kegiatan_ref').select('*').eq('jenis_penanganan',jenis).order('urutan'); if(error) throw error; return data; },
+  async kegiatanList(){ const {data,error} = await sb.from('v_kegiatan_penanganan').select('*'); if(error) throw error; return data; },
+  async insertKegiatan(payload){ const {data,error} = await sb.from('penanganan').insert(payload).select().single(); if(error) throw error; return data; },
+  async uploadFoto(file, folder){ const path = `${folder}/${Date.now()}_${file.name}`.replace(/\s+/g,'_'); const {error} = await sb.storage.from('dokumentasi-jalan').upload(path, file); if(error) throw error; return path; },
+  async dokumenMatrix(){ const {data,error} = await sb.from('v_dokumen_matrix').select('*'); if(error) throw error; return data; },
+  async tahapList(){ const {data,error} = await sb.from('tahap_kegiatan').select('*').order('urutan'); if(error) throw error; return data; },
+  async updateDokumen(id, payload){ const {error} = await sb.from('dokumen_kegiatan').update(payload).eq('id',id); if(error) throw error; },
 };
 
 // --- 5. AUTH ---------------------------------------------------------------
@@ -150,6 +177,8 @@ const NAV_ITEMS = [
   {id:'dashboard', label:'Dashboard', icon:'grid'},
   {id:'peta', label:'Peta Jaringan', icon:'map'},
   {id:'ruas', label:'Ruas Jalan', icon:'road'},
+  {id:'kegiatan', label:'Kegiatan Penanganan', icon:'wrench'},
+  {id:'dokumen', label:'Dokumen', icon:'file'},
   {id:'anggaran', label:'Anggaran', icon:'wallet'},
   {id:'bencana', label:'Kejadian Bencana', icon:'alert'},
 ];
@@ -161,6 +190,8 @@ const ICONS = {
   alert:'<path d="M12 3 2 20h20L12 3Z"/><path d="M12 10v4M12 17h.01"/>',
   logout:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/>',
   user:'<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/>',
+  wrench:'<path d="M14.7 6.3a4 4 0 0 0-5.6 5.6L3 18v3h3l6.1-6.1a4 4 0 0 0 5.6-5.6l-2.7 2.7-2-2 2.7-2.7Z"/>',
+  file:'<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/>',
 };
 function icon(name, cls='w-5 h-5'){ return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||''}</svg>`; }
 
@@ -202,7 +233,7 @@ function renderShell(){
 }
 
 function routeView(){
-  const map = {dashboard:viewDashboard, peta:viewPeta, ruas:viewRuas, anggaran:viewAnggaran, bencana:viewBencana, admin:viewAdmin};
+  const map = {dashboard:viewDashboard, peta:viewPeta, ruas:viewRuas, kegiatan:viewKegiatan, dokumen:viewDokumen, anggaran:viewAnggaran, bencana:viewBencana, admin:viewAdmin};
   (map[state.route]||viewDashboard)();
 }
 
@@ -559,9 +590,9 @@ async function viewRuasDetail(id){
 }
 
 // --- 11. MODAL: TAMBAH RUAS -------------------------------------------
-function openModal(innerHtml){
+function openModal(innerHtml, widthClass='max-w-lg'){
   const overlay = el(`<div class="modal-overlay fixed inset-0 z-50 flex items-center justify-center p-4"></div>`);
-  overlay.innerHTML = `<div class="card w-full max-w-lg max-h-[88vh] overflow-y-auto p-6 relative">${innerHtml}</div>`;
+  overlay.innerHTML = `<div class="card w-full ${widthClass} max-h-[88vh] overflow-y-auto p-6 relative">${innerHtml}</div>`;
   overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.remove(); });
   document.body.appendChild(overlay);
   return overlay;
@@ -640,6 +671,304 @@ function openSurveiFormModal(ruas, segmenList){
         created_by: state.user.id,
       });
       overlay.remove(); viewRuasDetail(ruas.id);
+    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
+  });
+}
+
+// --- 11b. VIEW: KEGIATAN PENANGANAN ---------------------------------------
+async function viewKegiatan(){
+  const v = document.getElementById('view');
+  v.innerHTML = `<div class="skel h-10 w-full mb-4"></div><div class="skel h-96 w-full"></div>`;
+  try{
+    const [rows, ruas] = await Promise.all([api.kegiatanList(), state.ruasCache.length? Promise.resolve(state.ruasCache) : api.ruasList()]);
+    state.ruasCache = ruas.length ? ruas : state.ruasCache;
+    v.innerHTML = `
+    <div class="flex items-start justify-between flex-wrap gap-3 mb-1">
+      <div><h1 class="font-display font-extrabold text-2xl text-ink-900">Kegiatan Penanganan</h1>
+      <p class="text-ink-500 text-[13.5px]">Riwayat kegiatan pemeliharaan, rehabilitasi, dan peningkatan jalan.</p></div>
+      ${isEditor()?`<button id="btn-add-kegiatan" class="btn-primary">+ Tambah Kegiatan Penanganan</button>`:''}
+    </div>
+    <input id="kg-search" placeholder="Cari ruas / sub kegiatan…" class="max-w-sm mb-4 mt-3">
+    <div class="card overflow-x-auto">
+      <table><thead><tr>
+        <th>Tanggal</th><th>Ruas</th><th>Jenis Kegiatan</th><th>Sub Kegiatan</th><th>Kategori Ruang</th>
+        <th>STA Awal</th><th>STA Akhir</th><th>PCI/SDI/IKP</th><th>Kondisi Hasil</th><th>Rekomendasi</th>
+        <th>Volume</th><th>Satuan</th><th>Biaya</th><th>Sumber Dana</th><th>Kontraktor/Pelaksana</th>
+      </tr></thead><tbody id="kg-tbody"></tbody></table>
+    </div>
+    <div id="kg-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Belum ada kegiatan penanganan yang cocok.</div>`;
+
+    function renderRows(){
+      const q = document.getElementById('kg-search').value.toLowerCase();
+      const filtered = rows.filter(r=> !q || (r.nama_ruas||'').toLowerCase().includes(q) || (r.sub_kegiatan||'').toLowerCase().includes(q));
+      document.getElementById('kg-tbody').innerHTML = filtered.map(r=>`
+        <tr>
+          <td class="whitespace-nowrap">${fmtDate(r.tanggal_penanganan)}</td>
+          <td class="font-medium">${r.nama_ruas}</td>
+          <td class="capitalize">${JENIS_PENANGANAN_LABEL[r.jenis_penanganan]||(r.jenis_penanganan||'—').replaceAll('_',' ')}</td>
+          <td class="max-w-[220px]">${r.sub_kegiatan||'—'}</td>
+          <td class="capitalize">${KATEGORI_RUANG_LABEL[r.kategori_ruang]||'—'}</td>
+          <td class="font-mono">${r.sta_awal!=null? 'Sta.'+fmtNum(r.sta_awal,3):'—'}</td>
+          <td class="font-mono">${r.sta_akhir!=null? 'Sta.'+fmtNum(r.sta_akhir,3):'—'}</td>
+          <td class="font-mono text-[12px]">${r.nilai_pci??'-'} / ${r.nilai_sdi??'-'} / ${r.nilai_ikp??'-'}</td>
+          <td>${badge(r.kondisi_hasil)}</td>
+          <td>${r.rekomendasi||'—'}</td>
+          <td class="font-mono">${fmtNum(r.volume)}</td>
+          <td>${SATUAN_LABEL[r.satuan]||'—'}</td>
+          <td class="font-mono">${fmtRp(r.biaya)}</td>
+          <td>${(r.sumber_dana||'—').replaceAll('_',' ')}</td>
+          <td>${r.kontraktor_pelaksana||'—'}</td>
+        </tr>`).join('');
+      document.getElementById('kg-empty').classList.toggle('hidden', filtered.length>0);
+    }
+    document.getElementById('kg-search').addEventListener('input', renderRows);
+    renderRows();
+    if(isEditor()) document.getElementById('btn-add-kegiatan').addEventListener('click', ()=>openKegiatanFormModal());
+  }catch(err){ v.innerHTML = errorPanel(err); }
+}
+
+async function openKegiatanFormModal(){
+  const ruasOptions = state.ruasCache.length ? state.ruasCache : await api.ruasList();
+  state.ruasCache = ruasOptions;
+  const overlay = openModal(`
+    <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
+    <h3 class="font-display font-extrabold text-lg mb-1">Tambah Kegiatan Penanganan</h3>
+    <p class="text-[12px] text-ink-500 mb-4">Acuan jenis &amp; sub kegiatan: Permen PU No. 13 Tahun 2011 tentang Pedoman Pemeliharaan Jalan.</p>
+    <form id="form-kegiatan" class="space-y-4">
+      <div class="grid sm:grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Ruas Jalan *</label>
+          <select id="kg-ruas" required><option value="">– pilih ruas –</option>${ruasOptions.map(r=>`<option value="${r.id}">${r.nama_ruas}</option>`).join('')}</select></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Tanggal Penanganan *</label><input id="kg-tanggal" type="date" required></div>
+      </div>
+      <div class="grid sm:grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Jenis Kegiatan *</label>
+          <select id="kg-jenis" required><option value="">– pilih –</option>${Object.entries(JENIS_PENANGANAN_LABEL).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Sub Kegiatan *</label>
+          <select id="kg-sub" required disabled><option value="">– pilih jenis kegiatan terlebih dahulu –</option></select></div>
+      </div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Kategori Ruang</label>
+        <select id="kg-kategori"><option value="">– pilih –</option>${Object.entries(KATEGORI_RUANG_LABEL).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select></div>
+
+      <div>
+        <div class="font-semibold text-[13.5px] mb-1">Dokumentasi Foto Lokasi</div>
+        <p class="text-[11.5px] text-ink-400 mb-2">Unggah foto kondisi jalan di titik awal dan titik akhir segmen kegiatan.</p>
+        <div class="grid sm:grid-cols-2 gap-3">
+          <div><label class="text-[12px] font-semibold text-ink-600">Foto Titik Awal (STA Awal)</label><input id="kg-foto-awal" type="file" accept="image/*"><p class="text-[10.5px] text-ink-400 mt-1">JPG/PNG/WEBP, maks 5 MB</p></div>
+          <div><label class="text-[12px] font-semibold text-ink-600">Foto Titik Akhir (STA Akhir)</label><input id="kg-foto-akhir" type="file" accept="image/*"><p class="text-[10.5px] text-ink-400 mt-1">JPG/PNG/WEBP, maks 5 MB</p></div>
+        </div>
+        <div class="grid sm:grid-cols-2 gap-3 mt-2">
+          <div><label class="text-[12.5px] font-semibold text-ink-600">STA Awal</label><input id="kg-sta-awal" type="number" step="0.001" min="0" placeholder="mis. 0.000"></div>
+          <div><label class="text-[12.5px] font-semibold text-ink-600">STA Akhir</label><input id="kg-sta-akhir" type="number" step="0.001" min="0" placeholder="mis. 1.500"></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="font-semibold text-[13.5px] mb-1">Skala Kerusakan &amp; Kondisi</div>
+        <p class="text-[11.5px] text-ink-400 mb-2">PCI &amp; IKP: 0–100 (semakin tinggi semakin baik). SDI: semakin rendah semakin baik. Isi salah satu nilai PCI/SDI/IKP untuk melihat estimasi kondisi &amp; rekomendasi penanganan.</p>
+        <div class="grid grid-cols-3 gap-3">
+          <div><label class="text-[12px] font-semibold text-ink-600">PCI</label><input id="kg-pci" type="number" min="0" max="100" step="0.1"></div>
+          <div><label class="text-[12px] font-semibold text-ink-600">SDI</label><input id="kg-sdi" type="number" min="0" step="0.1"></div>
+          <div><label class="text-[12px] font-semibold text-ink-600">IKP</label><input id="kg-ikp" type="number" min="0" max="100" step="0.1"></div>
+        </div>
+        <div id="kg-estimasi" class="text-[12.5px] mt-2 text-ink-500"></div>
+      </div>
+
+      <div class="grid sm:grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Volume</label><input id="kg-volume" type="number" step="0.01" min="0"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Satuan</label><select id="kg-satuan"><option value="">– pilih –</option>${Object.entries(SATUAN_LABEL).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select></div>
+      </div>
+      <div class="grid sm:grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Biaya (Rp)</label><input id="kg-biaya" type="number" step="1" min="0"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Sumber Dana</label><select id="kg-sumber"><option value="">– pilih –</option><option value="APBD_Provinsi">APBD Provinsi</option><option value="APBN">APBN</option><option value="DAK">DAK</option><option value="Hibah">Hibah</option><option value="Lainnya">Lainnya</option></select></div>
+      </div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Kontraktor / Pelaksana</label><input id="kg-kontraktor" placeholder="mis. Swakelola Bidang Bina Marga / CV..."></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Link Dokumentasi (opsional)</label><input id="kg-link" placeholder="https://drive.google.com/..."></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Keterangan</label><textarea id="kg-keterangan" rows="2"></textarea></div>
+
+      <div id="kg-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
+      <div class="flex justify-end gap-2 pt-1">
+        <button type="button" data-close class="btn-ghost">Batal</button>
+        <button type="submit" class="btn-primary">Simpan</button>
+      </div>
+    </form>`, 'max-w-2xl');
+
+  overlay.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click', ()=>overlay.remove()));
+
+  const jenisSel = overlay.querySelector('#kg-jenis');
+  const subSel = overlay.querySelector('#kg-sub');
+  jenisSel.addEventListener('change', async ()=>{
+    if(!jenisSel.value){ subSel.innerHTML = `<option value="">– pilih jenis kegiatan terlebih dahulu –</option>`; subSel.disabled = true; return; }
+    subSel.innerHTML = `<option value="">Memuat…</option>`; subSel.disabled = true;
+    try{
+      const subs = await api.subKegiatanRef(jenisSel.value);
+      subSel.innerHTML = subs.length? `<option value="">– pilih –</option>${subs.map(s=>`<option value="${s.nama_sub_kegiatan.replace(/"/g,'&quot;')}">${s.nama_sub_kegiatan}</option>`).join('')}` : `<option value="">Belum ada referensi sub kegiatan</option>`;
+      subSel.disabled = false;
+    }catch(e){ subSel.innerHTML = `<option value="">Gagal memuat sub kegiatan</option>`; }
+  });
+
+  const estBox = overlay.querySelector('#kg-estimasi');
+  ['#kg-pci','#kg-sdi','#kg-ikp'].forEach(sel=>overlay.querySelector(sel).addEventListener('input', ()=>{
+    const pci = overlay.querySelector('#kg-pci').value, sdi = overlay.querySelector('#kg-sdi').value, ikp = overlay.querySelector('#kg-ikp').value;
+    const est = estimasiKondisi(pci,sdi,ikp);
+    estBox.innerHTML = est? `Estimasi kondisi: ${badge(est.kondisi)} <span class="ml-1">→ Rekomendasi: <b>${est.rekomendasi}</b></span>` : '';
+  }));
+
+  overlay.querySelector('#form-kegiatan').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const errBox = overlay.querySelector('#kg-err');
+    const submitBtn = overlay.querySelector('button[type=submit]');
+    submitBtn.disabled = true; submitBtn.textContent = 'Menyimpan…';
+    try{
+      const pci = overlay.querySelector('#kg-pci').value, sdi = overlay.querySelector('#kg-sdi').value, ikp = overlay.querySelector('#kg-ikp').value;
+      const est = estimasiKondisi(pci,sdi,ikp);
+      let fotoAwalPath = null, fotoAkhirPath = null;
+      const fAwal = overlay.querySelector('#kg-foto-awal').files[0];
+      const fAkhir = overlay.querySelector('#kg-foto-akhir').files[0];
+      if(fAwal) fotoAwalPath = await api.uploadFoto(fAwal, 'foto-lokasi');
+      if(fAkhir) fotoAkhirPath = await api.uploadFoto(fAkhir, 'foto-lokasi');
+
+      const tanggal = overlay.querySelector('#kg-tanggal').value;
+      await api.insertKegiatan({
+        ruas_id: overlay.querySelector('#kg-ruas').value,
+        tanggal_mulai: tanggal,
+        tahun_anggaran: tanggal ? new Date(tanggal).getFullYear() : new Date().getFullYear(),
+        jenis_penanganan: overlay.querySelector('#kg-jenis').value,
+        sub_kegiatan: overlay.querySelector('#kg-sub').value || null,
+        kategori_ruang: overlay.querySelector('#kg-kategori').value || null,
+        sta_awal: overlay.querySelector('#kg-sta-awal').value || null,
+        sta_akhir: overlay.querySelector('#kg-sta-akhir').value || null,
+        nilai_pci: pci || null, nilai_sdi: sdi || null, nilai_ikp: ikp || null,
+        kondisi_hasil: est ? est.kondisi : null, rekomendasi: est ? est.rekomendasi : null,
+        volume: overlay.querySelector('#kg-volume').value || null,
+        satuan: overlay.querySelector('#kg-satuan').value || null,
+        biaya: overlay.querySelector('#kg-biaya').value || null,
+        sumber_dana: overlay.querySelector('#kg-sumber').value || null,
+        kontraktor_pelaksana: overlay.querySelector('#kg-kontraktor').value || null,
+        link_dokumentasi: overlay.querySelector('#kg-link').value || null,
+        deskripsi: overlay.querySelector('#kg-keterangan').value || null,
+        foto_awal_path: fotoAwalPath, foto_akhir_path: fotoAkhirPath,
+        status_pekerjaan: 'selesai',
+        created_by: state.user.id,
+      });
+      overlay.remove();
+      viewKegiatan();
+    }catch(err){
+      errBox.textContent = err.message; errBox.classList.remove('hidden');
+      submitBtn.disabled = false; submitBtn.textContent = 'Simpan';
+    }
+  });
+}
+
+// --- 11c. VIEW: DOKUMEN ----------------------------------------------------
+async function viewDokumen(){
+  const v = document.getElementById('view');
+  v.innerHTML = `<div class="skel h-10 w-full mb-4"></div><div class="skel h-96 w-full"></div>`;
+  try{
+    const matrix = await api.dokumenMatrix();
+    const groups = {};
+    matrix.forEach(row=>{
+      if(!groups[row.penanganan_id]) groups[row.penanganan_id] = {
+        penanganan_id: row.penanganan_id, ruas: row.nama_ruas, kode_ruas: row.kode_ruas,
+        tanggal: row.tanggal_penanganan, jenis: row.jenis_penanganan, sub: row.sub_kegiatan, items: []
+      };
+      groups[row.penanganan_id].items.push(row);
+    });
+    const list = Object.values(groups).sort((a,b)=> new Date(b.tanggal||0) - new Date(a.tanggal||0));
+
+    v.innerHTML = `
+    <div class="mb-2"><h1 class="font-display font-extrabold text-2xl text-ink-900">Dokumen</h1>
+    <p class="text-ink-500 text-[13.5px]">Dokumen terkait pekerjaan/serah terima. Matriks kelengkapan dokumen per ruas jalan &amp; per tahap. Klik <b>+ Tambah</b> pada dokumen yang diinginkan.</p></div>
+    <div class="grid lg:grid-cols-[280px_1fr] gap-5 mt-4">
+      <div class="card p-0 overflow-hidden">
+        <div class="px-4 py-3 border-b border-line font-display font-bold text-[13px] bg-[#F8FAFD]">Ruas Jalan &amp; Kegiatan Penanganan</div>
+        <div id="dok-sidebar" class="max-h-[70vh] overflow-y-auto"></div>
+      </div>
+      <div id="dok-detail" class="card p-5">
+        <div class="text-ink-400 text-[13.5px] text-center py-16">${list.length? 'Pilih ruas &amp; kegiatan di sebelah kiri.' : 'Belum ada kegiatan penanganan. Tambahkan lewat menu Kegiatan Penanganan.'}</div>
+      </div>
+    </div>`;
+
+    const sidebar = document.getElementById('dok-sidebar');
+    sidebar.innerHTML = list.map((g,i)=>{
+      const total = g.items.length, done = g.items.filter(it=>it.status==='sudah').length;
+      return `<button data-idx="${i}" class="dok-item w-full text-left px-4 py-3 border-b border-line hover:bg-[#F8FAFD] block">
+        <div class="flex items-center justify-between"><span class="text-[11.5px] text-ink-400">${fmtDate(g.tanggal)}</span><span class="font-mono text-[10.5px] text-ink-400">${done}/${total}</span></div>
+        <div class="font-semibold text-[13px]">${g.ruas}</div>
+        <div class="text-[12px] text-ink-500 capitalize">${JENIS_PENANGANAN_LABEL[g.jenis]||(g.jenis||'').replaceAll('_',' ')}${g.sub? ' · '+g.sub : ''}</div>
+      </button>`;
+    }).join('');
+
+    function renderDetail(idx){
+      const g = list[idx];
+      sidebar.querySelectorAll('.dok-item').forEach(b=>b.classList.toggle('bg-[#EEF3FA]', Number(b.dataset.idx)===idx));
+      const byTahap = {};
+      g.items.forEach(it=>{ (byTahap[it.tahap_urutan] ||= {nama:it.tahap_nama, items:[]}).items.push(it); });
+      const tahapKeys = Object.keys(byTahap).sort((a,b)=>a-b);
+      const detail = document.getElementById('dok-detail');
+      detail.innerHTML = `
+        <div class="mb-4 flex items-start justify-between flex-wrap gap-2">
+          <div>
+            <div class="text-[11.5px] text-ink-400">${fmtDate(g.tanggal)}</div>
+            <div class="font-display font-bold text-[16px]">${g.ruas}</div>
+            <div class="text-[13px] text-ink-500 capitalize">${JENIS_PENANGANAN_LABEL[g.jenis]||(g.jenis||'').replaceAll('_',' ')}${g.sub? ' · '+g.sub : ''}</div>
+          </div>
+        </div>
+        <div class="flex gap-3 overflow-x-auto pb-2">
+        ${tahapKeys.map(tk=>`
+          <div class="border border-line rounded-lg p-3 shrink-0" style="width:230px">
+            <div class="font-display font-bold text-[12px] text-navy-700 mb-2 uppercase">Tahap ${tk}<div class="font-normal normal-case text-ink-500 text-[11px]">${byTahap[tk].nama}</div></div>
+            <div class="space-y-2.5">
+            ${byTahap[tk].items.map(it=>`
+              <div class="text-[12px]">
+                <div class="flex items-start gap-1.5">
+                  ${it.status==='sudah'? `<span class="text-[var(--good)] shrink-0">✓</span>` : `<span class="text-ink-300 shrink-0">○</span>`}
+                  <span class="${it.status==='sudah'?'text-ink-700':'text-ink-500'}">${it.nama_dokumen}</span>
+                </div>
+                ${it.status==='sudah'
+                  ? `<div class="flex items-center gap-2 mt-0.5 ml-5"><a href="${it.link_dokumen}" target="_blank" rel="noopener" class="text-navy-600 text-[11px] underline truncate max-w-[110px]">Lihat</a><button data-dok="${it.dokumen_id}" class="dok-edit text-[11px] text-ink-400 hover:text-navy-700">Ubah</button></div>`
+                  : `<button data-dok="${it.dokumen_id}" class="dok-add text-[11px] text-navy-700 font-semibold ml-5 mt-0.5">+ Tambah</button>`}
+              </div>`).join('')}
+            </div>
+          </div>`).join('')}
+        </div>`;
+      detail.querySelectorAll('.dok-add, .dok-edit').forEach(btn=>btn.addEventListener('click', ()=>{
+        const item = g.items.find(x=>x.dokumen_id===btn.dataset.dok);
+        openDokumenLinkModal(g, item, ()=>viewDokumen());
+      }));
+    }
+    sidebar.querySelectorAll('.dok-item').forEach(b=>b.addEventListener('click', ()=>renderDetail(Number(b.dataset.idx))));
+    if(list.length) renderDetail(0);
+  }catch(err){ v.innerHTML = errorPanel(err); }
+}
+
+function openDokumenLinkModal(group, item, onDone){
+  const overlay = openModal(`
+    <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
+    <h3 class="font-display font-extrabold text-lg mb-1">Sematkan Link Dokumen</h3>
+    <p class="text-[12px] text-ink-500 mb-4">Tempelkan link Google Drive / URL untuk dokumen berikut.</p>
+    <div class="text-[12.5px] bg-[#F8FAFD] border border-line rounded-lg p-3 mb-4 space-y-0.5">
+      <div><span class="text-ink-400">Ruas:</span> <b>${group.ruas}</b></div>
+      <div><span class="text-ink-400">Tahap ${item.tahap_urutan}:</span> ${item.tahap_nama}</div>
+      <div><span class="text-ink-400">Kegiatan:</span> <span class="capitalize">${JENIS_PENANGANAN_LABEL[group.jenis]||(group.jenis||'').replaceAll('_',' ')}</span>${group.sub? ' · '+group.sub:''}</div>
+      <div><span class="text-ink-400">Dokumen:</span> <b>${item.nama_dokumen}</b></div>
+    </div>
+    <form id="form-dok" class="space-y-3">
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Link Dokumen (Google Drive / URL) *</label><input id="dl-link" required placeholder="https://drive.google.com/..." value="${item.link_dokumen||''}"></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Keterangan</label><textarea id="dl-ket" rows="2">${item.dok_keterangan||''}</textarea></div>
+      <div id="dl-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
+      <div class="flex justify-end gap-2 pt-1"><button type="button" data-close class="btn-ghost">Batal</button><button type="submit" class="btn-primary">Simpan</button></div>
+    </form>`);
+  overlay.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click', ()=>overlay.remove()));
+  overlay.querySelector('#form-dok').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const errBox = overlay.querySelector('#dl-err');
+    try{
+      await api.updateDokumen(item.dokumen_id, {
+        link_dokumen: overlay.querySelector('#dl-link').value,
+        keterangan: overlay.querySelector('#dl-ket').value || null,
+        status: 'sudah', uploaded_by: state.user.id, tanggal_update: new Date().toISOString(),
+      });
+      overlay.remove(); onDone && onDone();
     }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
   });
 }
