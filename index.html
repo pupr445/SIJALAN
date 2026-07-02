@@ -167,13 +167,26 @@ async function signedFotoUrls(paths){
 }
 function fotoThumbHtml(path, cls='w-10 h-10'){
   if(!path) return `<div class="${cls} rounded-lg bg-[#EEF1F6] flex items-center justify-center text-ink-400 shrink-0">${icon('image','w-4 h-4')}</div>`;
-  return `<img data-foto-path="${path}" class="${cls} rounded-lg object-cover bg-[#EEF1F6] shrink-0" src="" alt="Foto dokumentasi" onerror="this.replaceWith(el(fotoThumbHtml(null,'${cls}')))">`;
+  return `<div class="relative ${cls} shrink-0 rounded-lg overflow-hidden bg-[#EEF1F6]">
+    <div class="${cls} absolute inset-0 flex items-center justify-center text-ink-400" data-foto-placeholder>${icon('image','w-4 h-4')}</div>
+    <img data-foto-path="${path}" class="${cls} rounded-lg object-cover absolute inset-0 opacity-0" alt="Foto dokumentasi">
+  </div>`;
 }
 async function hydrateFotoThumbs(container){
   const imgs = [...container.querySelectorAll('img[data-foto-path]')];
   if(!imgs.length) return;
   const map = await signedFotoUrls(imgs.map(i=>i.dataset.fotoPath));
-  imgs.forEach(img=>{ const url = map[img.dataset.fotoPath]; if(url) img.src = url; else img.replaceWith(el(fotoThumbHtml(null, img.className.split(' ').filter(c=>c.startsWith('w-')||c.startsWith('h-')).join(' ')||'w-10 h-10'))); });
+  imgs.forEach(img=>{
+    const url = map[img.dataset.fotoPath];
+    if(!url){ console.error('[foto] tidak ada signed URL untuk path:', img.dataset.fotoPath); return; }
+    img.addEventListener('load', ()=>{
+      img.classList.remove('opacity-0');
+      const ph = img.parentElement?.querySelector('[data-foto-placeholder]');
+      if(ph) ph.remove();
+    });
+    img.addEventListener('error', (e)=>{ console.error('[foto] gagal memuat gambar dari signed URL:', url); });
+    img.src = url;
+  });
 }
 // Preview file gambar yang baru dipilih user di <input type=file> ke elemen <img>.
 function wirePhotoPreview(inputEl, imgEl, placeholderEl){
