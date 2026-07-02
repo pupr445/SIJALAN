@@ -93,6 +93,26 @@ function fmtDate(d){ if(!d) return '—'; return new Date(d).toLocaleDateString(
 function badge(kondisi){ if(!kondisi) return `<span class="badge badge-na">Belum disurvei</span>`; return `<span class="badge badge-${kondisi}"><svg width="6" height="6"><circle cx="3" cy="3" r="3" fill="currentColor"/></svg>${KONDISI_LABEL[kondisi]}</span>`; }
 function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstElementChild; }
 
+// Pasangkan <select> yang punya opsi "Lainnya" dengan <input> teks di sebelahnya,
+// supaya saat opsi "Lainnya" dipilih, user langsung mengetik nilainya di situ
+// (tanpa popup prompt()). getValue() mengembalikan teks ketikan jika "Lainnya"
+// dipilih, atau nilai select biasa jika bukan.
+function wireLainnyaOption(selectEl, inputEl, {sentinel='lainnya', known=[], current=null} = {}){
+  function sync(){
+    const isCustom = selectEl.value === sentinel;
+    inputEl.classList.toggle('hidden', !isCustom);
+    if(isCustom){ inputEl.setAttribute('required',''); if(document.body.contains(inputEl)) inputEl.focus(); }
+    else { inputEl.removeAttribute('required'); inputEl.value=''; }
+  }
+  selectEl.onchange = sync;
+  if(current && !known.includes(current)){
+    selectEl.value = sentinel;
+    inputEl.value = current;
+  }
+  sync();
+  return ()=> selectEl.value===sentinel ? (inputEl.value.trim() || sentinel) : selectEl.value;
+}
+
 // --- 3. PARSER WKB HEX -> GEOJSON (ringan, tanpa dependensi) --------------
 function wkbHexToLatLngs(hex){
   if(!hex) return null;
@@ -548,7 +568,7 @@ async function viewRuas(){
       <select id="f-kondisi" class="max-w-[180px]"><option value="">Semua Kondisi</option>${KONDISI_ORDER.map(k=>`<option value="${k}">${KONDISI_LABEL[k]}</option>`).join('')}</select>
     </div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th>Kode</th><th>Nama Ruas</th><th>Kab/Kota</th><th>Status</th><th>Panjang</th><th>Kondisi</th>${isEditor()?'<th>Aksi</th>':''}</tr></thead>
+      <table><thead><tr><th>Kode</th><th>Nama Ruas</th><th>Kab/Kota</th><th>Status</th><th>Panjang</th><th>Lebar</th><th>Kondisi</th>${isEditor()?'<th>Aksi</th>':''}</tr></thead>
       <tbody id="ruas-tbody"></tbody></table>
     </div>
     <div id="ruas-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada ruas yang cocok dengan filter.</div>`;
@@ -573,6 +593,7 @@ async function viewRuas(){
           <td class="text-ink-500">${r.kabupaten?.nama || '—'}</td>
           <td class="capitalize text-ink-500">${r.status_jalan||'—'}</td>
           <td class="font-mono">${fmtNum(r.panjang_km,1)} km</td>
+          <td class="font-mono">${r.lebar_jalan_m!=null? fmtNum(r.lebar_jalan_m,1)+' m' : '—'}</td>
           <td>${badge(worstByRuas[r.id])}</td>
           ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
         </tr>`).join('');
@@ -611,7 +632,7 @@ async function viewRuasDetail(id){
       <div>
         <span class="font-mono text-navy-700 font-bold text-[13px]">${ruas.kode_ruas}</span>
         <h1 class="font-display font-extrabold text-2xl text-ink-900 mt-0.5">${ruas.nama_ruas}</h1>
-        <p class="text-ink-500 text-[13.5px] mt-1">${ruas.kabupaten?.nama||'—'} · <span class="capitalize">${ruas.status_jalan||'—'}</span> · ${ruas.fungsi_jalan? 'Fungsi '+ruas.fungsi_jalan : ''} · ${fmtNum(ruas.panjang_km,1)} km</p>
+        <p class="text-ink-500 text-[13.5px] mt-1">${ruas.kabupaten?.nama||'—'} · <span class="capitalize">${ruas.status_jalan||'—'}</span> · ${ruas.fungsi_jalan? 'Fungsi '+ruas.fungsi_jalan : ''} · ${fmtNum(ruas.panjang_km,1)} km${ruas.lebar_jalan_m!=null? ' · Lebar '+fmtNum(ruas.lebar_jalan_m,1)+' m' : ''}</p>
       </div>
       ${isEditor()?`<div class="flex gap-2"><button id="btn-add-survei" class="btn-ghost">+ Survei Kondisi</button><button id="btn-add-kegiatan" class="btn-primary">+ Kegiatan Penanganan</button></div>`:''}
     </div>
@@ -774,8 +795,9 @@ function openRuasFormModal(kabupaten, editData=null){
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div><label class="text-[12.5px] font-semibold text-ink-600">Panjang (km)</label><input id="rj-panjang" type="number" step="0.001" min="0" value="${editData?.panjang_km??''}"></div>
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Kabupaten/Kota *</label><select id="rj-kabupaten" required><option value="">Pilih…</option>${kabupaten.map(k=>`<option value="${k.id}" ${editData?.kabupaten_id===k.id?'selected':''}>${k.nama}</option>`).join('')}</select></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Lebar Jalan (m)</label><input id="rj-lebar" type="number" step="0.01" min="0" placeholder="mis. 6" value="${editData?.lebar_jalan_m??''}"></div>
       </div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Kabupaten/Kota *</label><select id="rj-kabupaten" required><option value="">Pilih…</option>${kabupaten.map(k=>`<option value="${k.id}" ${editData?.kabupaten_id===k.id?'selected':''}>${k.nama}</option>`).join('')}</select></div>
       <div><label class="text-[12.5px] font-semibold text-ink-600">Keterangan</label><textarea id="rj-ket" rows="2">${editData?.keterangan||''}</textarea></div>
       <p class="text-[11.5px] text-ink-400">Geometri peta (garis rute) dapat ditambahkan kemudian melalui Table Editor Supabase atau alat GIS.</p>
       <div id="rj-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
@@ -791,6 +813,7 @@ function openRuasFormModal(kabupaten, editData=null){
       status_jalan: overlay.querySelector('#rj-status').value,
       fungsi_jalan: overlay.querySelector('#rj-fungsi').value || null,
       panjang_km: overlay.querySelector('#rj-panjang').value || null,
+      lebar_jalan_m: overlay.querySelector('#rj-lebar').value || null,
       kabupaten_id: overlay.querySelector('#rj-kabupaten').value,
       keterangan: overlay.querySelector('#rj-ket').value || null,
     };
@@ -822,14 +845,15 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
           <option value="visual" ${!editData||editData?.metode_survei==='visual'?'selected':''}>Visual</option>
           <option value="alat_ukur" ${editData?.metode_survei==='alat_ukur'?'selected':''}>Alat Ukur</option>
           <option value="drone" ${editData?.metode_survei==='drone'?'selected':''}>Drone</option>
-          <option value="lainnya" ${editData?.metode_survei==='lainnya'?'selected':''}>Lainnya</option>
-        </select></div>
+          <option value="lainnya">Lainnya (isi manual)</option>
+        </select><input id="sv-metode-lainnya" class="hidden mt-2" placeholder="Tuliskan metode survei…"></div>
       </div>
       <div><label class="text-[12.5px] font-semibold text-ink-600">Catatan</label><textarea id="sv-catatan" rows="2">${editData?.catatan||''}</textarea></div>
       <div id="sv-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
       <button type="submit" class="btn-primary w-full" ${segmenList.length?'':'disabled'}>${isEdit?'Simpan Perubahan':'Simpan Survei'}</button>
     </form>`);
   overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+  const getMetodeSurvei = wireLainnyaOption(overlay.querySelector('#sv-metode'), overlay.querySelector('#sv-metode-lainnya'), {known:['visual','alat_ukur','drone'], current: editData?.metode_survei});
   overlay.querySelector('#form-survei').addEventListener('submit', async (e)=>{
     e.preventDefault();
     const errBox = overlay.querySelector('#sv-err');
@@ -838,7 +862,7 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
       tanggal_survei: overlay.querySelector('#sv-tanggal').value,
       kondisi: overlay.querySelector('#sv-kondisi').value,
       nilai_iri: overlay.querySelector('#sv-iri').value || null,
-      metode_survei: overlay.querySelector('#sv-metode').value,
+      metode_survei: getMetodeSurvei(),
       catatan: overlay.querySelector('#sv-catatan').value || null,
     };
     try{
@@ -860,7 +884,7 @@ const STATUS_PEKERJAAN_OPT = [
   ['perencanaan','Perencanaan'],['proses_lelang','Proses Lelang'],['dalam_pengerjaan','Dalam Pengerjaan'],
   ['selesai','Selesai'],['terhenti','Terhenti'],
 ];
-const SUMBER_DANA_OPT = [['APBD_Provinsi','APBD Provinsi'],['APBN','APBN'],['DAK','DAK'],['Hibah','Hibah'],['Lainnya','Lainnya']];
+const SUMBER_DANA_OPT = [['APBD_Provinsi','APBD Provinsi'],['APBN','APBN'],['DAK','DAK'],['Hibah','Hibah'],['Lainnya','Lainnya (isi manual)']];
 const SATUAN_OPT = ['m','m2','m3','unit','ls'];
 
 function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=null){
@@ -878,7 +902,7 @@ function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=nul
         <div><label class="text-[12.5px] font-semibold text-ink-600">Kategori Ruang</label>
           <select id="kg-kategori"><option value="">—</option><option value="rumija" ${editData?.kategori_ruang==='rumija'?'selected':''}>Rumija</option><option value="rumaja" ${editData?.kategori_ruang==='rumaja'?'selected':''}>Rumaja</option><option value="ruwasja" ${editData?.kategori_ruang==='ruwasja'?'selected':''}>Ruwasja</option></select></div>
       </div>
-      <div><label class="text-[12.5px] font-semibold text-ink-600">Sub Kegiatan</label><select id="kg-sub"><option value="">Pilih jenis penanganan dahulu…</option></select></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Sub Kegiatan</label><select id="kg-sub"><option value="">Pilih jenis penanganan dahulu…</option></select><input id="kg-sub-lainnya" class="hidden mt-2" placeholder="Tuliskan sub kegiatan…"></div>
       <div id="kg-bencana-wrap" class="hidden">
         <label class="text-[12.5px] font-semibold text-ink-600">Terkait Kejadian Bencana (opsional)</label>
         <select id="kg-bencana"><option value="">— Tidak terkait kejadian tertentu —</option></select>
@@ -895,7 +919,7 @@ function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=nul
         <div><label class="text-[12.5px] font-semibold text-ink-600">Status Pekerjaan *</label>
           <select id="kg-status" required>${STATUS_PEKERJAAN_OPT.map(([v,l])=>`<option value="${v}" ${(editData?.status_pekerjaan||'perencanaan')===v?'selected':''}>${l}</option>`).join('')}</select></div>
         <div><label class="text-[12.5px] font-semibold text-ink-600">Sumber Dana</label>
-          <select id="kg-sumber"><option value="">—</option>${SUMBER_DANA_OPT.map(([v,l])=>`<option value="${v}" ${editData?.sumber_dana===v?'selected':''}>${l}</option>`).join('')}</select></div>
+          <select id="kg-sumber"><option value="">—</option>${SUMBER_DANA_OPT.map(([v,l])=>`<option value="${v}" ${editData?.sumber_dana===v?'selected':''}>${l}</option>`).join('')}</select><input id="kg-sumber-lainnya" class="hidden mt-2" placeholder="Tuliskan sumber dana…"></div>
       </div>
       <div class="grid grid-cols-3 gap-3">
         <div><label class="text-[12.5px] font-semibold text-ink-600">Nilai PCI</label><input id="kg-pci" type="number" step="0.01" value="${editData?.nilai_pci??''}"></div>
@@ -920,18 +944,18 @@ function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=nul
     </form>`);
   overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
 
+  let getSubKegiatan = ()=>overlay.querySelector('#kg-sub').value;
   async function loadSubKegiatan(jenis, selected){
     const sel = overlay.querySelector('#kg-sub');
+    const inp = overlay.querySelector('#kg-sub-lainnya');
     sel.innerHTML = `<option value="">Memuat…</option>`;
     try{
       const list = await api.subKegiatanRef(jenis);
       sel.innerHTML = `<option value="">— Pilih sub kegiatan —</option>` +
-        list.map(s=>`<option value="${s.nama_sub_kegiatan}" ${selected===s.nama_sub_kegiatan?'selected':''}>${s.nama_sub_kegiatan}</option>`).join('') +
+        list.map(s=>`<option value="${s.nama_sub_kegiatan}">${s.nama_sub_kegiatan}</option>`).join('') +
         `<option value="__custom__">Lainnya (isi manual)</option>`;
-      if(selected && !list.find(s=>s.nama_sub_kegiatan===selected)){
-        sel.innerHTML += `<option value="${selected}" selected>${selected}</option>`;
-      }
-    }catch(e){ sel.innerHTML = `<option value="">Gagal memuat sub kegiatan</option>`; }
+      getSubKegiatan = wireLainnyaOption(sel, inp, {sentinel:'__custom__', known:list.map(s=>s.nama_sub_kegiatan), current: selected});
+    }catch(e){ sel.innerHTML = `<option value="">Gagal memuat sub kegiatan</option>`; getSubKegiatan = ()=>''; }
   }
   overlay.querySelector('#kg-jenis').addEventListener('change', (e)=>{ loadSubKegiatan(e.target.value, null); toggleBencanaField(); });
   loadSubKegiatan(overlay.querySelector('#kg-jenis').value, editData?.sub_kegiatan);
@@ -957,11 +981,11 @@ function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=nul
   });
   toggleBencanaField();
 
+  const getSumberDana = wireLainnyaOption(overlay.querySelector('#kg-sumber'), overlay.querySelector('#kg-sumber-lainnya'), {sentinel:'Lainnya', known:['APBD_Provinsi','APBN','DAK','Hibah'], current: editData?.sumber_dana});
   overlay.querySelector('#form-kegiatan').addEventListener('submit', async (e)=>{
     e.preventDefault();
     const errBox = overlay.querySelector('#kg-err');
-    let subKegiatan = overlay.querySelector('#kg-sub').value;
-    if(subKegiatan === '__custom__'){ subKegiatan = prompt('Tulis nama sub kegiatan:') || ''; }
+    const subKegiatan = getSubKegiatan();
     const tglMulai = overlay.querySelector('#kg-tgl-mulai').value;
     const payload = {
       ruas_id: overlay.querySelector('#kg-ruas').value,
@@ -974,7 +998,7 @@ function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=nul
       tanggal_selesai: overlay.querySelector('#kg-tgl-selesai').value || null,
       tahun_anggaran: tglMulai ? new Date(tglMulai).getFullYear() : new Date().getFullYear(),
       status_pekerjaan: overlay.querySelector('#kg-status').value,
-      sumber_dana: overlay.querySelector('#kg-sumber').value || null,
+      sumber_dana: getSumberDana() || null,
       nilai_pci: overlay.querySelector('#kg-pci').value || null,
       nilai_sdi: overlay.querySelector('#kg-sdi').value || null,
       nilai_ikp: overlay.querySelector('#kg-ikp').value || null,
@@ -1069,7 +1093,7 @@ function openAnggaranFormModal(ruas, editData=null, onSaved=null){
     <form id="form-anggaran" class="space-y-3">
       <div class="grid grid-cols-2 gap-3">
         <div><label class="text-[12.5px] font-semibold text-ink-600">Tahun *</label><input id="ag-tahun" type="number" required min="2000" max="2100" value="${editData?.tahun||new Date().getFullYear()}"></div>
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Sumber Dana</label><select id="ag-sumber"><option value="">—</option>${SUMBER_DANA_OPT.map(([v,l])=>`<option value="${v}" ${editData?.sumber_dana===v?'selected':''}>${l}</option>`).join('')}</select></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Sumber Dana</label><select id="ag-sumber"><option value="">—</option>${SUMBER_DANA_OPT.map(([v,l])=>`<option value="${v}" ${editData?.sumber_dana===v?'selected':''}>${l}</option>`).join('')}</select><input id="ag-sumber-lainnya" class="hidden mt-2" placeholder="Tuliskan sumber dana…"></div>
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div><label class="text-[12.5px] font-semibold text-ink-600">Pagu (Rp)</label><input id="ag-pagu" type="number" step="1" min="0" value="${editData?.pagu??0}"></div>
@@ -1079,13 +1103,14 @@ function openAnggaranFormModal(ruas, editData=null, onSaved=null){
       <button type="submit" class="btn-primary w-full">${isEdit?'Simpan Perubahan':'Simpan Anggaran'}</button>
     </form>`);
   overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+  const getSumberDanaAg = wireLainnyaOption(overlay.querySelector('#ag-sumber'), overlay.querySelector('#ag-sumber-lainnya'), {sentinel:'Lainnya', known:['APBD_Provinsi','APBN','DAK','Hibah'], current: editData?.sumber_dana});
   overlay.querySelector('#form-anggaran').addEventListener('submit', async (e)=>{
     e.preventDefault();
     const errBox = overlay.querySelector('#ag-err');
     const payload = {
       ruas_id: ruas.id,
       tahun: overlay.querySelector('#ag-tahun').value,
-      sumber_dana: overlay.querySelector('#ag-sumber').value || null,
+      sumber_dana: getSumberDanaAg() || null,
       pagu: overlay.querySelector('#ag-pagu').value || 0,
       realisasi: overlay.querySelector('#ag-realisasi').value || 0,
     };
@@ -1117,8 +1142,8 @@ function openBencanaFormModal(ruasList, editData=null, onSaved=null, presetRuasI
             <option value="abrasi" ${editData?.jenis_kejadian==='abrasi'?'selected':''}>Abrasi</option>
             <option value="gempa" ${editData?.jenis_kejadian==='gempa'?'selected':''}>Gempa</option>
             <option value="angin_kencang" ${editData?.jenis_kejadian==='angin_kencang'?'selected':''}>Angin Kencang</option>
-            <option value="lainnya" ${editData?.jenis_kejadian==='lainnya'?'selected':''}>Lainnya</option>
-          </select></div>
+            <option value="lainnya">Lainnya (isi manual)</option>
+          </select><input id="bc-jenis-lainnya" class="hidden mt-2" placeholder="Tuliskan jenis kejadian…"></div>
         <div><label class="text-[12.5px] font-semibold text-ink-600">Tanggal Kejadian *</label><input id="bc-tanggal" type="date" required value="${editData?.tanggal_kejadian||''}"></div>
       </div>
       <div><label class="text-[12.5px] font-semibold text-ink-600">Tingkat Kerusakan</label>
@@ -1156,6 +1181,7 @@ function openBencanaFormModal(ruasList, editData=null, onSaved=null, presetRuasI
     loadSegmenOptions(presetRuasId, null);
   }
 
+  const getJenisKejadian = wireLainnyaOption(overlay.querySelector('#bc-jenis'), overlay.querySelector('#bc-jenis-lainnya'), {known:['longsor','banjir','abrasi','gempa','angin_kencang'], current: editData?.jenis_kejadian});
   overlay.querySelector('#form-bencana').addEventListener('submit', async (e)=>{
     e.preventDefault();
     const errBox = overlay.querySelector('#bc-err');
@@ -1163,7 +1189,7 @@ function openBencanaFormModal(ruasList, editData=null, onSaved=null, presetRuasI
     const payload = {
       ruas_id: ruasId || null,
       segmen_id: overlay.querySelector('#bc-segmen').value || null,
-      jenis_kejadian: overlay.querySelector('#bc-jenis').value,
+      jenis_kejadian: getJenisKejadian(),
       tanggal_kejadian: overlay.querySelector('#bc-tanggal').value,
       tingkat_kerusakan: overlay.querySelector('#bc-tingkat').value || null,
       deskripsi: overlay.querySelector('#bc-deskripsi').value || null,
@@ -1589,8 +1615,8 @@ function openDrainaseFormModal(ruasList, editData=null, onSaved=null){
             <option value="saluran_terbuka" ${editData?.jenis==='saluran_terbuka'?'selected':''}>Saluran Terbuka</option>
             <option value="saluran_tertutup" ${editData?.jenis==='saluran_tertutup'?'selected':''}>Saluran Tertutup</option>
             <option value="gorong_gorong" ${editData?.jenis==='gorong_gorong'?'selected':''}>Gorong-gorong</option>
-            <option value="lainnya" ${editData?.jenis==='lainnya'?'selected':''}>Lainnya</option>
-          </select></div>
+            <option value="lainnya">Lainnya (isi manual)</option>
+          </select><input id="dr-jenis-lainnya" class="hidden mt-2" placeholder="Tuliskan jenis drainase…"></div>
         <div><label class="text-[12.5px] font-semibold text-ink-600">Sisi</label>
           <select id="dr-sisi">
             <option value="kiri" ${editData?.sisi==='kiri'?'selected':''}>Kiri</option>
@@ -1618,12 +1644,13 @@ function openDrainaseFormModal(ruasList, editData=null, onSaved=null){
     const ruasId = ruasList.find(r=>r.kode_ruas===editData.segmen_jalan.ruas_jalan.kode_ruas)?.id;
     if(ruasId){ overlay.querySelector('#dr-ruas').value = ruasId; loadSegmenOptionsInto(overlay.querySelector('#dr-segmen'), ruasId, editData.segmen_id); }
   }
+  const getJenisDrainase = wireLainnyaOption(overlay.querySelector('#dr-jenis'), overlay.querySelector('#dr-jenis-lainnya'), {known:['saluran_terbuka','saluran_tertutup','gorong_gorong'], current: editData?.jenis});
   overlay.querySelector('#form-drainase').addEventListener('submit', async (e)=>{
     e.preventDefault();
     const errBox = overlay.querySelector('#dr-err');
     const payload = {
       segmen_id: overlay.querySelector('#dr-segmen').value,
-      jenis: overlay.querySelector('#dr-jenis').value,
+      jenis: getJenisDrainase(),
       sisi: overlay.querySelector('#dr-sisi').value,
       panjang_m: overlay.querySelector('#dr-panjang').value || null,
       kondisi: overlay.querySelector('#dr-kondisi').value || null,
@@ -1689,8 +1716,8 @@ function openPerlengkapanFormModal(ruasList, editData=null, onSaved=null){
             <option value="guardrail" ${editData?.jenis==='guardrail'?'selected':''}>Guardrail</option>
             <option value="lampu_jalan" ${editData?.jenis==='lampu_jalan'?'selected':''}>Lampu Jalan</option>
             <option value="patok_km" ${editData?.jenis==='patok_km'?'selected':''}>Patok KM</option>
-            <option value="lainnya" ${editData?.jenis==='lainnya'?'selected':''}>Lainnya</option>
-          </select></div>
+            <option value="lainnya">Lainnya (isi manual)</option>
+          </select><input id="pl-jenis-lainnya" class="hidden mt-2" placeholder="Tuliskan jenis perlengkapan…"></div>
         <div><label class="text-[12.5px] font-semibold text-ink-600">STA</label><input id="pl-sta" type="number" step="0.001" value="${editData?.sta??''}"></div>
       </div>
       <div class="grid grid-cols-2 gap-3">
@@ -1713,12 +1740,13 @@ function openPerlengkapanFormModal(ruasList, editData=null, onSaved=null){
     const ruasId = ruasList.find(r=>r.kode_ruas===editData.segmen_jalan.ruas_jalan.kode_ruas)?.id;
     if(ruasId){ overlay.querySelector('#pl-ruas').value = ruasId; loadSegmenOptionsInto(overlay.querySelector('#pl-segmen'), ruasId, editData.segmen_id); }
   }
+  const getJenisPerlengkapan = wireLainnyaOption(overlay.querySelector('#pl-jenis'), overlay.querySelector('#pl-jenis-lainnya'), {known:['rambu','marka','guardrail','lampu_jalan','patok_km'], current: editData?.jenis});
   overlay.querySelector('#form-perlengkapan').addEventListener('submit', async (e)=>{
     e.preventDefault();
     const errBox = overlay.querySelector('#pl-err');
     const payload = {
       segmen_id: overlay.querySelector('#pl-segmen').value,
-      jenis: overlay.querySelector('#pl-jenis').value,
+      jenis: getJenisPerlengkapan(),
       sta: overlay.querySelector('#pl-sta').value || null,
       jumlah: overlay.querySelector('#pl-jumlah').value || 1,
       kondisi: overlay.querySelector('#pl-kondisi').value || null,
