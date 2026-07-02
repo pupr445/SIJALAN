@@ -198,6 +198,51 @@ function wirePhotoPreview(inputEl, imgEl, placeholderEl){
     if(placeholderEl) placeholderEl.classList.add('hidden');
   });
 }
+// Galeri thumbnail untuk banyak foto (dipakai untuk foto survei kondisi yang jumlahnya tidak dibatasi).
+// Tampilan dibatasi maks `maxShown` thumbnail (+sisa) supaya layout tetap rapi; data foto sendiri tidak dibatasi.
+function fotoGalleryHtml(paths, cls='w-12 h-12', maxShown=4){
+  const list = (paths||[]).filter(Boolean);
+  if(!list.length) return fotoThumbHtml(null, cls);
+  const shown = list.slice(0, maxShown);
+  const rest = list.length - shown.length;
+  return `<div class="flex flex-wrap gap-1.5">${shown.map(p=>fotoThumbHtml(p, cls)).join('')}${rest>0?`<div class="${cls} rounded-lg bg-[#EEF1F6] flex items-center justify-center text-ink-500 text-[11px] font-semibold shrink-0">+${rest}</div>`:''}</div>`;
+}
+// Picker foto multi-file tanpa batas jumlah: mendukung pilih banyak foto sekaligus,
+// menambah foto secara bertahap (beberapa kali pilih), dan menghapus foto lama/baru
+// sebelum disimpan. Mengembalikan getter untuk path foto lama yang dipertahankan
+// dan file foto baru yang perlu diunggah.
+function wireMultiPhotoPicker(inputEl, existingContainer, newContainer, existingPaths){
+  let kept = [...(existingPaths||[])];
+  let newFiles = [];
+  function renderExisting(){
+    existingContainer.innerHTML = kept.map((p,i)=>`
+      <div class="relative w-14 h-14 shrink-0">
+        ${fotoThumbHtml(p,'w-14 h-14')}
+        <button type="button" data-remove-existing="${i}" class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[var(--bad)] text-white text-[11px] leading-5 text-center">✕</button>
+      </div>`).join('');
+    hydrateFotoThumbs(existingContainer);
+    existingContainer.querySelectorAll('[data-remove-existing]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{ kept.splice(Number(btn.dataset.removeExisting),1); renderExisting(); });
+    });
+  }
+  function renderNew(){
+    newContainer.innerHTML = newFiles.map((f,i)=>`
+      <div class="relative w-14 h-14 shrink-0">
+        <img src="${URL.createObjectURL(f)}" class="w-14 h-14 rounded-lg object-cover" alt="Foto baru">
+        <button type="button" data-remove-new="${i}" class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[var(--bad)] text-white text-[11px] leading-5 text-center">✕</button>
+      </div>`).join('');
+    newContainer.querySelectorAll('[data-remove-new]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{ newFiles.splice(Number(btn.dataset.removeNew),1); renderNew(); });
+    });
+  }
+  inputEl.addEventListener('change', ()=>{
+    newFiles = newFiles.concat([...(inputEl.files||[])]);
+    inputEl.value = '';
+    renderNew();
+  });
+  renderExisting(); renderNew();
+  return { getKeptPaths: ()=>kept, getNewFiles: ()=>newFiles };
+}
 
 // --- 3. PARSER WKB HEX -> GEOJSON (ringan, tanpa dependensi) --------------
 function wkbHexToLatLngs(hex){
@@ -761,7 +806,7 @@ async function viewRuasDetail(id){
           <div id="survei-list">${survei.length? survei.map(s=>`
             <div class="border-b border-line last:border-0 py-3 flex items-start justify-between gap-3" data-sid="${s.id}">
               <div class="flex items-start gap-2.5 min-w-0">
-                ${fotoThumbHtml(s.foto_path)}
+                ${fotoGalleryHtml(s.foto_paths?.length? s.foto_paths : (s.foto_path?[s.foto_path]:[]), 'w-10 h-10')}
                 <div class="min-w-0">
                   <div class="font-semibold text-[13.5px]">${s.segmen_jalan?.kode_segmen||'Segmen'} <span class="text-ink-400 font-normal">· ${fmtDate(s.tanggal_survei)}</span></div>
                   <div class="text-[12.5px] text-ink-500 mt-0.5">STA ${fmtNum(s.segmen_jalan?.sta_awal,3)}–${fmtNum(s.segmen_jalan?.sta_akhir,3)} ${s.nilai_iri?'· IRI '+fmtNum(s.nilai_iri,2):''} ${s.metode_survei?'· '+s.metode_survei.replaceAll('_',' '):''}</div>
@@ -984,33 +1029,30 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
       <div><label class="text-[12.5px] font-semibold text-ink-600">Catatan</label><textarea id="sv-catatan" rows="2">${editData?.catatan||''}</textarea></div>
       <div>
         <label class="text-[12.5px] font-semibold text-ink-600">Foto Kondisi</label>
-        <div class="flex items-center gap-2 mt-1">
-          <div class="relative w-14 h-14 shrink-0">
-            <div id="sv-foto-ph" class="w-14 h-14 rounded-lg bg-[#EEF1F6] flex items-center justify-center text-ink-400 ${editData?.foto_path?'hidden':''}">${icon('camera','w-5 h-5')}</div>
-            <img id="sv-foto-preview" data-foto-path="${editData?.foto_path||''}" class="w-14 h-14 rounded-lg object-cover ${editData?.foto_path?'':'hidden'}" src="" alt="Foto kondisi jalan">
-          </div>
-          <input id="sv-foto" type="file" accept="image/*" capture="environment" class="!py-1.5 text-[12px] flex-1 min-w-0">
-        </div>
+        <p class="text-[11.5px] text-ink-400 mt-0.5 mb-1.5">Bisa pilih lebih dari satu foto sekaligus, atau tambahkan bertahap. Tidak ada batas jumlah foto.</p>
+        <div id="sv-foto-existing" class="flex flex-wrap gap-2 mb-1.5"></div>
+        <div id="sv-foto-new" class="flex flex-wrap gap-2 mb-1.5"></div>
+        <input id="sv-foto" type="file" accept="image/*" multiple class="!py-1.5 text-[12px] w-full">
       </div>
       <div id="sv-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
       <button type="submit" class="btn-primary w-full" ${segmenList.length?'':'disabled'}>${isEdit?'Simpan Perubahan':'Simpan Survei'}</button>
     </form>`);
   overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
   const getMetodeSurvei = wireLainnyaOption(overlay.querySelector('#sv-metode'), overlay.querySelector('#sv-metode-lainnya'), {known:['visual','alat_ukur','drone'], current: editData?.metode_survei});
-  wirePhotoPreview(overlay.querySelector('#sv-foto'), overlay.querySelector('#sv-foto-preview'), overlay.querySelector('#sv-foto-ph'));
+  const existingFotoPaths = editData?.foto_paths?.length ? editData.foto_paths : (editData?.foto_path ? [editData.foto_path] : []);
+  const fotoPicker = wireMultiPhotoPicker(overlay.querySelector('#sv-foto'), overlay.querySelector('#sv-foto-existing'), overlay.querySelector('#sv-foto-new'), existingFotoPaths);
   hydrateFotoThumbs(overlay);
   overlay.querySelector('#form-survei').addEventListener('submit', async (e)=>{
     e.preventDefault();
     const errBox = overlay.querySelector('#sv-err');
     errBox.classList.add('hidden');
     const submitBtn = overlay.querySelector('button[type="submit"]');
-    const fileFoto = overlay.querySelector('#sv-foto').files?.[0] || null;
+    const newFiles = fotoPicker.getNewFiles();
     submitBtn.disabled = true; const submitLabel = submitBtn.textContent;
     try{
-      if(fileFoto){ submitBtn.textContent = 'Mengunggah foto…'; }
-      const fotoPath = fileFoto
-        ? await uploadFotoKegiatan(fileFoto, ruas.id, 'kondisi', 'survei')
-        : (editData?.foto_path || null);
+      if(newFiles.length){ submitBtn.textContent = `Mengunggah ${newFiles.length} foto…`; }
+      const uploadedPaths = await Promise.all(newFiles.map(f=>uploadFotoKegiatan(f, ruas.id, 'kondisi', 'survei')));
+      const fotoPaths = [...fotoPicker.getKeptPaths(), ...uploadedPaths];
       submitBtn.textContent = submitLabel;
       const payload = {
         segmen_id: overlay.querySelector('#sv-segmen').value,
@@ -1019,7 +1061,8 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
         nilai_iri: overlay.querySelector('#sv-iri').value || null,
         metode_survei: getMetodeSurvei(),
         catatan: overlay.querySelector('#sv-catatan').value || null,
-        foto_path: fotoPath,
+        foto_paths: fotoPaths,
+        foto_path: fotoPaths[0] || null,
       };
       if(isEdit){ await api.updateSurvei(editData.id, payload); }
       else{ payload.created_by = state.user.id; await api.insertSurvei(payload); }
@@ -1439,7 +1482,7 @@ async function viewKegiatan(){
       <select id="fk-status" class="max-w-[180px]"><option value="">Semua Status</option>${STATUS_PEKERJAAN_OPT.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
     </div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th>Foto</th><th>Ruas</th><th>Jenis</th><th>Sub Kegiatan</th><th>Tanggal</th><th>Biaya</th><th>Status</th>${isEditor()?'<th>Aksi</th>':''}</tr></thead>
+      <table><thead><tr><th>Foto</th><th>Ruas</th><th>Jenis</th><th>Sub Kegiatan</th><th>Tanggal</th><th>Biaya</th><th>Status</th><th>Link Dokumentasi</th>${isEditor()?'<th>Aksi</th>':''}</tr></thead>
       <tbody id="kegiatan-tbody"></tbody></table>
     </div>
     <div id="kegiatan-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Belum ada kegiatan penanganan yang tercatat.</div>`;
@@ -1464,6 +1507,7 @@ async function viewKegiatan(){
           <td class="font-mono text-[12.5px]">${fmtDate(k.tanggal_penanganan)}</td>
           <td class="font-mono text-[12.5px]">${fmtRp(k.biaya)}</td>
           <td><span class="badge ${k.status_pekerjaan==='selesai'?'badge-baik':k.status_pekerjaan==='terhenti'?'badge-rusak_berat':'badge-sedang'} capitalize">${(k.status_pekerjaan||'—').replaceAll('_',' ')}</span></td>
+          <td class="max-w-[160px]">${k.link_dokumentasi?`<a href="${k.link_dokumentasi}" target="_blank" rel="noopener" data-stop-row class="text-navy-700 underline text-[12.5px] truncate block">Buka Link</a>`:'<span class="text-ink-400 text-[12.5px]">—</span>'}</td>
           ${isEditor()?`<td>${actionBtns({onDetail:true, onEdit:true, onDelete:isAdmin()})}</td>`:''}
         </tr>`).join('');
       document.getElementById('kegiatan-empty').classList.toggle('hidden', rows.length>0);
@@ -1471,6 +1515,7 @@ async function viewKegiatan(){
       tbody.querySelectorAll('tr').forEach(tr=>{
         const kg = kegiatan.find(k=>k.id===tr.dataset.id);
         tr.addEventListener('click', ()=>openKegiatanDetailModal(kg));
+        tr.querySelector('[data-stop-row]')?.addEventListener('click', (e)=>e.stopPropagation());
         tr.querySelector('[data-act="detail"]')?.addEventListener('click', ()=>openKegiatanDetailModal(kg));
         tr.querySelector('[data-act="edit"]')?.addEventListener('click', async ()=>{
           try{ const full = await api.penangananById(kg.id); openKegiatanFormModal(ruas, {id:kg.ruas_id}, {...kg, ...full}, ()=>viewKegiatan()); }
