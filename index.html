@@ -113,6 +113,74 @@ function wireLainnyaOption(selectEl, inputEl, {sentinel='lainnya', known=[], cur
   return ()=> selectEl.value===sentinel ? (inputEl.value.trim() || sentinel) : selectEl.value;
 }
 
+// Ambil koordinat GPS perangkat saat ini lalu isikan ke pasangan input lat/long.
+// Dipakai pada form Ruas Jalan (Titik Awal / Titik Akhir).
+function wireGpsButton(btnEl, latInput, longInput, statusEl){
+  btnEl.addEventListener('click', ()=>{
+    if(!navigator.geolocation){ statusEl.textContent = 'Perangkat/browser ini tidak mendukung GPS.'; statusEl.classList.remove('hidden'); return; }
+    btnEl.disabled = true; const origLabel = btnEl.innerHTML;
+    btnEl.innerHTML = 'Mengambil lokasi…';
+    statusEl.classList.add('hidden');
+    navigator.geolocation.getCurrentPosition(
+      (pos)=>{
+        latInput.value = pos.coords.latitude.toFixed(6);
+        longInput.value = pos.coords.longitude.toFixed(6);
+        statusEl.textContent = `Akurasi ±${Math.round(pos.coords.accuracy)} m`;
+        statusEl.classList.remove('hidden');
+        btnEl.disabled = false; btnEl.innerHTML = origLabel;
+      },
+      (err)=>{
+        statusEl.textContent = 'Gagal mengambil lokasi: ' + (err.message||'izin lokasi ditolak.');
+        statusEl.classList.remove('hidden');
+        btnEl.disabled = false; btnEl.innerHTML = origLabel;
+      },
+      { enableHighAccuracy:true, timeout:15000, maximumAge:0 }
+    );
+  });
+}
+
+// --- FOTO DOKUMENTASI (Supabase Storage bucket privat 'dokumentasi-jalan') ---
+const FOTO_BUCKET = 'dokumentasi-jalan';
+async function uploadFotoKegiatan(file, ruasId, label){
+  if(!file) return null;
+  const ext = (file.name.split('.').pop()||'jpg').toLowerCase().replace(/[^a-z0-9]/g,'') || 'jpg';
+  const path = `penanganan/${ruasId||'umum'}/${Date.now()}_${label}.${ext}`;
+  const {error} = await sb.storage.from(FOTO_BUCKET).upload(path, file, {upsert:false, cacheControl:'3600'});
+  if(error) throw error;
+  return path;
+}
+async function signedFotoUrls(paths){
+  const uniq = [...new Set((paths||[]).filter(Boolean))];
+  if(!uniq.length) return {};
+  try{
+    const {data, error} = await sb.storage.from(FOTO_BUCKET).createSignedUrls(uniq, 3600);
+    if(error) throw error;
+    const map = {};
+    (data||[]).forEach(d=>{ if(d.signedUrl) map[d.path] = d.signedUrl; });
+    return map;
+  }catch(e){ return {}; }
+}
+function fotoThumbHtml(path, cls='w-10 h-10'){
+  if(!path) return `<div class="${cls} rounded-lg bg-[#EEF1F6] flex items-center justify-center text-ink-400 shrink-0">${icon('image','w-4 h-4')}</div>`;
+  return `<img data-foto-path="${path}" class="${cls} rounded-lg object-cover bg-[#EEF1F6] shrink-0" src="" alt="Foto dokumentasi" onerror="this.replaceWith(el(fotoThumbHtml(null,'${cls}')))">`;
+}
+async function hydrateFotoThumbs(container){
+  const imgs = [...container.querySelectorAll('img[data-foto-path]')];
+  if(!imgs.length) return;
+  const map = await signedFotoUrls(imgs.map(i=>i.dataset.fotoPath));
+  imgs.forEach(img=>{ const url = map[img.dataset.fotoPath]; if(url) img.src = url; else img.replaceWith(el(fotoThumbHtml(null, img.className.split(' ').filter(c=>c.startsWith('w-')||c.startsWith('h-')).join(' ')||'w-10 h-10'))); });
+}
+// Preview file gambar yang baru dipilih user di <input type=file> ke elemen <img>.
+function wirePhotoPreview(inputEl, imgEl, placeholderEl){
+  inputEl.addEventListener('change', ()=>{
+    const f = inputEl.files?.[0];
+    if(!f){ return; }
+    const url = URL.createObjectURL(f);
+    imgEl.src = url; imgEl.classList.remove('hidden');
+    if(placeholderEl) placeholderEl.classList.add('hidden');
+  });
+}
+
 // --- 3. PARSER WKB HEX -> GEOJSON (ringan, tanpa dependensi) --------------
 function wkbHexToLatLngs(hex){
   if(!hex) return null;
@@ -253,6 +321,9 @@ const ICONS = {
   doc:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/>',
   check:'<path d="M20 6 9 17l-5-5"/>',
   bridge:'<path d="M2 20h20M4 20v-6M8 20v-9M12 20v-11M16 20v-9M20 20v-6M2 11c4-4.5 16-4.5 20 0"/>',
+  camera:'<path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/>',
+  pin:'<path d="M12 21s-7-6.5-7-11.5A7 7 0 0 1 19 9.5C19 14.5 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.3"/>',
+  image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M21 16l-5.5-5.5L4 21"/>',
 };
 function actionBtns({onEdit, onDelete, onDetail}={}){
   let html = '<div class="flex items-center gap-1.5" onclick="event.stopPropagation()">';
@@ -652,12 +723,15 @@ async function viewRuasDetail(id){
           </div>
           <div id="kegiatan-list">${kegiatan.length? kegiatan.map(r=>`
             <div class="border-b border-line last:border-0 py-3 flex items-start justify-between gap-3 row-hover cursor-pointer" data-kid="${r.id}">
-              <div>
-                <div class="font-semibold text-[13.5px] capitalize">${(r.jenis_penanganan||'—').replaceAll('_',' ')} <span class="text-ink-400 font-normal">· TA ${new Date(r.tanggal_penanganan||r.created_at).getFullYear()}</span></div>
-                <div class="text-[12.5px] text-ink-500 mt-0.5">STA ${fmtNum(r.sta_awal,3)}–${fmtNum(r.sta_akhir,3)} · ${fmtDate(r.tanggal_penanganan)}</div>
-                ${r.sub_kegiatan? `<div class="text-[12px] text-ink-400 mt-0.5">${r.sub_kegiatan}</div>`:''}
-                ${r.kontraktor_pelaksana? `<div class="text-[12px] text-ink-400 mt-0.5">Pelaksana: ${r.kontraktor_pelaksana} ${r.biaya? '· '+fmtRp(r.biaya):''}</div>`:''}
-                ${r.kejadian_bencana_id? `<div class="text-[11.5px] text-[var(--bad)] mt-0.5">⚠ Menangani kejadian: ${(r.bencana_jenis_kejadian||'—').replaceAll('_',' ')} · ${fmtDate(r.bencana_tanggal_kejadian)}</div>`:''}
+              <div class="flex items-start gap-3">
+                ${fotoThumbHtml(r.foto_awal_path || r.foto_akhir_path)}
+                <div>
+                  <div class="font-semibold text-[13.5px] capitalize">${(r.jenis_penanganan||'—').replaceAll('_',' ')} <span class="text-ink-400 font-normal">· TA ${new Date(r.tanggal_penanganan||r.created_at).getFullYear()}</span></div>
+                  <div class="text-[12.5px] text-ink-500 mt-0.5">STA ${fmtNum(r.sta_awal,3)}–${fmtNum(r.sta_akhir,3)} · ${fmtDate(r.tanggal_penanganan)}</div>
+                  ${r.sub_kegiatan? `<div class="text-[12px] text-ink-400 mt-0.5">${r.sub_kegiatan}</div>`:''}
+                  ${r.kontraktor_pelaksana? `<div class="text-[12px] text-ink-400 mt-0.5">Pelaksana: ${r.kontraktor_pelaksana} ${r.biaya? '· '+fmtRp(r.biaya):''}</div>`:''}
+                  ${r.kejadian_bencana_id? `<div class="text-[11.5px] text-[var(--bad)] mt-0.5">⚠ Menangani kejadian: ${(r.bencana_jenis_kejadian||'—').replaceAll('_',' ')} · ${fmtDate(r.bencana_tanggal_kejadian)}</div>`:''}
+                </div>
               </div>
               <div class="flex items-center gap-2 shrink-0">
                 ${isEditor()? actionBtns({onDetail:true, onEdit:true, onDelete:isAdmin()}) : ''}
@@ -710,10 +784,18 @@ async function viewRuasDetail(id){
               </div>
             </div>`).join('') : `<p class="text-ink-400 text-[13px]">Belum ada data anggaran.</p>`}</div>
         </div>
+        ${(ruas.lat_awal||ruas.lat_akhir)? `<div class="card p-5">
+          <h3 class="font-display font-bold text-[15px] mb-3">Koordinat GPS</h3>
+          <div class="space-y-2 text-[13px]">
+            ${ruas.lat_awal&&ruas.long_awal? `<div class="flex items-center justify-between"><div><span class="text-ink-400">Titik Awal</span><div class="font-mono">${fmtNum(ruas.lat_awal,6)}, ${fmtNum(ruas.long_awal,6)}</div></div><a href="https://www.google.com/maps?q=${ruas.lat_awal},${ruas.long_awal}" target="_blank" class="text-navy-700 text-[12px] underline shrink-0">Buka Peta</a></div>`:''}
+            ${ruas.lat_akhir&&ruas.long_akhir? `<div class="flex items-center justify-between"><div><span class="text-ink-400">Titik Akhir</span><div class="font-mono">${fmtNum(ruas.lat_akhir,6)}, ${fmtNum(ruas.long_akhir,6)}</div></div><a href="https://www.google.com/maps?q=${ruas.lat_akhir},${ruas.long_akhir}" target="_blank" class="text-navy-700 text-[12px] underline shrink-0">Buka Peta</a></div>`:''}
+          </div>
+        </div>`:''}
         ${ruas.keterangan? `<div class="card p-5"><h3 class="font-display font-bold text-[15px] mb-2">Keterangan</h3><p class="text-[13px] text-ink-600">${ruas.keterangan}</p></div>`:''}
       </div>
     </div>`;
     document.getElementById('back-ruas').addEventListener('click', ()=>{ state.selectedRuasId=null; renderShell(); });
+    hydrateFotoThumbs(document.getElementById('kegiatan-list'));
     if(isEditor()){
       document.getElementById('btn-add-survei')?.addEventListener('click', ()=>openSurveiFormModal(ruas, segmen, null, ()=>viewRuasDetail(id)));
       document.getElementById('btn-add-kegiatan')?.addEventListener('click', ()=>openKegiatanFormModal(ruasAll, ruas, null, ()=>viewRuasDetail(id)));
@@ -798,12 +880,37 @@ function openRuasFormModal(kabupaten, editData=null){
         <div><label class="text-[12.5px] font-semibold text-ink-600">Lebar Jalan (m)</label><input id="rj-lebar" type="number" step="0.01" min="0" placeholder="mis. 6" value="${editData?.lebar_jalan_m??''}"></div>
       </div>
       <div><label class="text-[12.5px] font-semibold text-ink-600">Kabupaten/Kota *</label><select id="rj-kabupaten" required><option value="">Pilih…</option>${kabupaten.map(k=>`<option value="${k.id}" ${editData?.kabupaten_id===k.id?'selected':''}>${k.nama}</option>`).join('')}</select></div>
+      <div class="card !border-dashed p-3">
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-[12.5px] font-semibold text-ink-600">Titik Awal Ruas (Lat, Long)</label>
+          <button type="button" id="rj-gps-awal" class="btn-ghost !py-1 !px-2.5 text-[12px] flex items-center gap-1">${icon('pin','w-3.5 h-3.5')} Ambil GPS</button>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <input id="rj-lat-awal" type="number" step="0.000001" placeholder="Latitude" value="${editData?.lat_awal??''}">
+          <input id="rj-long-awal" type="number" step="0.000001" placeholder="Longitude" value="${editData?.long_awal??''}">
+        </div>
+        <p id="rj-gps-awal-status" class="hidden text-[11.5px] text-ink-400 mt-1.5"></p>
+      </div>
+      <div class="card !border-dashed p-3">
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-[12.5px] font-semibold text-ink-600">Titik Akhir Ruas (Lat, Long)</label>
+          <button type="button" id="rj-gps-akhir" class="btn-ghost !py-1 !px-2.5 text-[12px] flex items-center gap-1">${icon('pin','w-3.5 h-3.5')} Ambil GPS</button>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <input id="rj-lat-akhir" type="number" step="0.000001" placeholder="Latitude" value="${editData?.lat_akhir??''}">
+          <input id="rj-long-akhir" type="number" step="0.000001" placeholder="Longitude" value="${editData?.long_akhir??''}">
+        </div>
+        <p id="rj-gps-akhir-status" class="hidden text-[11.5px] text-ink-400 mt-1.5"></p>
+      </div>
+      <p class="text-[11.5px] text-ink-400">Tombol "Ambil GPS" memakai lokasi perangkat saat ini — pastikan berdiri tepat di titik awal/akhir ruas dan izin lokasi browser sudah diaktifkan.</p>
       <div><label class="text-[12.5px] font-semibold text-ink-600">Keterangan</label><textarea id="rj-ket" rows="2">${editData?.keterangan||''}</textarea></div>
       <p class="text-[11.5px] text-ink-400">Geometri peta (garis rute) dapat ditambahkan kemudian melalui Table Editor Supabase atau alat GIS.</p>
       <div id="rj-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
       <button type="submit" class="btn-primary w-full">${isEdit?'Simpan Perubahan':'Simpan Ruas Jalan'}</button>
     </form>`);
   overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+  wireGpsButton(overlay.querySelector('#rj-gps-awal'), overlay.querySelector('#rj-lat-awal'), overlay.querySelector('#rj-long-awal'), overlay.querySelector('#rj-gps-awal-status'));
+  wireGpsButton(overlay.querySelector('#rj-gps-akhir'), overlay.querySelector('#rj-lat-akhir'), overlay.querySelector('#rj-long-akhir'), overlay.querySelector('#rj-gps-akhir-status'));
   overlay.querySelector('#form-ruas').addEventListener('submit', async (e)=>{
     e.preventDefault();
     const errBox = overlay.querySelector('#rj-err');
@@ -815,6 +922,10 @@ function openRuasFormModal(kabupaten, editData=null){
       panjang_km: overlay.querySelector('#rj-panjang').value || null,
       lebar_jalan_m: overlay.querySelector('#rj-lebar').value || null,
       kabupaten_id: overlay.querySelector('#rj-kabupaten').value,
+      lat_awal: overlay.querySelector('#rj-lat-awal').value || null,
+      long_awal: overlay.querySelector('#rj-long-awal').value || null,
+      lat_akhir: overlay.querySelector('#rj-lat-akhir').value || null,
+      long_akhir: overlay.querySelector('#rj-long-akhir').value || null,
       keterangan: overlay.querySelector('#rj-ket').value || null,
     };
     try{
@@ -912,6 +1023,28 @@ function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=nul
         <div><label class="text-[12.5px] font-semibold text-ink-600">STA Akhir (km)</label><input id="kg-sta-akhir" type="number" step="0.001" min="0" value="${editData?.sta_akhir??''}"></div>
       </div>
       <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-[12.5px] font-semibold text-ink-600">Foto Lokasi STA Awal</label>
+          <div class="flex items-center gap-2 mt-1">
+            <div class="relative w-14 h-14 shrink-0">
+              <div id="kg-foto-awal-ph" class="w-14 h-14 rounded-lg bg-[#EEF1F6] flex items-center justify-center text-ink-400 ${editData?.foto_awal_path?'hidden':''}">${icon('camera','w-5 h-5')}</div>
+              <img id="kg-foto-awal-preview" data-foto-path="${editData?.foto_awal_path||''}" class="w-14 h-14 rounded-lg object-cover ${editData?.foto_awal_path?'':'hidden'}" src="" alt="Foto STA Awal">
+            </div>
+            <input id="kg-foto-awal" type="file" accept="image/*" capture="environment" class="!py-1.5 text-[12px]">
+          </div>
+        </div>
+        <div>
+          <label class="text-[12.5px] font-semibold text-ink-600">Foto Lokasi STA Akhir</label>
+          <div class="flex items-center gap-2 mt-1">
+            <div class="relative w-14 h-14 shrink-0">
+              <div id="kg-foto-akhir-ph" class="w-14 h-14 rounded-lg bg-[#EEF1F6] flex items-center justify-center text-ink-400 ${editData?.foto_akhir_path?'hidden':''}">${icon('camera','w-5 h-5')}</div>
+              <img id="kg-foto-akhir-preview" data-foto-path="${editData?.foto_akhir_path||''}" class="w-14 h-14 rounded-lg object-cover ${editData?.foto_akhir_path?'':'hidden'}" src="" alt="Foto STA Akhir">
+            </div>
+            <input id="kg-foto-akhir" type="file" accept="image/*" capture="environment" class="!py-1.5 text-[12px]">
+          </div>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
         <div><label class="text-[12.5px] font-semibold text-ink-600">Tanggal Mulai *</label><input id="kg-tgl-mulai" type="date" required value="${editData?.tanggal_penanganan||editData?.tanggal_mulai||''}"></div>
         <div><label class="text-[12.5px] font-semibold text-ink-600">Tanggal Selesai</label><input id="kg-tgl-selesai" type="date" value="${editData?.tanggal_selesai||''}"></div>
       </div>
@@ -981,44 +1114,65 @@ function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=nul
   });
   toggleBencanaField();
 
+  wirePhotoPreview(overlay.querySelector('#kg-foto-awal'), overlay.querySelector('#kg-foto-awal-preview'), overlay.querySelector('#kg-foto-awal-ph'));
+  wirePhotoPreview(overlay.querySelector('#kg-foto-akhir'), overlay.querySelector('#kg-foto-akhir-preview'), overlay.querySelector('#kg-foto-akhir-ph'));
+  hydrateFotoThumbs(overlay);
+
   const getSumberDana = wireLainnyaOption(overlay.querySelector('#kg-sumber'), overlay.querySelector('#kg-sumber-lainnya'), {sentinel:'Lainnya', known:['APBD_Provinsi','APBN','DAK','Hibah'], current: editData?.sumber_dana});
   overlay.querySelector('#form-kegiatan').addEventListener('submit', async (e)=>{
     e.preventDefault();
     const errBox = overlay.querySelector('#kg-err');
+    errBox.classList.add('hidden');
+    const submitBtn = overlay.querySelector('button[type="submit"]');
     const subKegiatan = getSubKegiatan();
     const tglMulai = overlay.querySelector('#kg-tgl-mulai').value;
-    const payload = {
-      ruas_id: overlay.querySelector('#kg-ruas').value,
-      jenis_penanganan: overlay.querySelector('#kg-jenis').value,
-      kategori_ruang: overlay.querySelector('#kg-kategori').value || null,
-      sub_kegiatan: subKegiatan || null,
-      sta_awal: overlay.querySelector('#kg-sta-awal').value || null,
-      sta_akhir: overlay.querySelector('#kg-sta-akhir').value || null,
-      tanggal_mulai: tglMulai || null,
-      tanggal_selesai: overlay.querySelector('#kg-tgl-selesai').value || null,
-      tahun_anggaran: tglMulai ? new Date(tglMulai).getFullYear() : new Date().getFullYear(),
-      status_pekerjaan: overlay.querySelector('#kg-status').value,
-      sumber_dana: getSumberDana() || null,
-      nilai_pci: overlay.querySelector('#kg-pci').value || null,
-      nilai_sdi: overlay.querySelector('#kg-sdi').value || null,
-      nilai_ikp: overlay.querySelector('#kg-ikp').value || null,
-      kondisi_hasil: overlay.querySelector('#kg-kondisi-hasil').value || null,
-      rekomendasi: overlay.querySelector('#kg-rekomendasi').value || null,
-      volume: overlay.querySelector('#kg-volume').value || null,
-      satuan: overlay.querySelector('#kg-satuan').value || null,
-      biaya: overlay.querySelector('#kg-biaya').value || null,
-      kontraktor_pelaksana: overlay.querySelector('#kg-kontraktor').value || null,
-      link_dokumentasi: overlay.querySelector('#kg-link').value || null,
-      deskripsi: overlay.querySelector('#kg-deskripsi').value || null,
-      kejadian_bencana_id: overlay.querySelector('#kg-jenis').value === 'tanggap_darurat' ? (overlay.querySelector('#kg-bencana').value || null) : null,
-    };
-    if(isEdit){ payload.segmen_id = editData?.segmen_id ?? null; }
+    const ruasId = overlay.querySelector('#kg-ruas').value;
+    const fileAwal = overlay.querySelector('#kg-foto-awal').files?.[0] || null;
+    const fileAkhir = overlay.querySelector('#kg-foto-akhir').files?.[0] || null;
+    submitBtn.disabled = true; const submitLabel = submitBtn.textContent;
     try{
+      if(fileAwal || fileAkhir){ submitBtn.textContent = 'Mengunggah foto…'; }
+      const [fotoAwalPath, fotoAkhirPath] = await Promise.all([
+        fileAwal? uploadFotoKegiatan(fileAwal, ruasId, 'awal') : Promise.resolve(editData?.foto_awal_path || null),
+        fileAkhir? uploadFotoKegiatan(fileAkhir, ruasId, 'akhir') : Promise.resolve(editData?.foto_akhir_path || null),
+      ]);
+      submitBtn.textContent = submitLabel;
+      const payload = {
+        ruas_id: ruasId,
+        jenis_penanganan: overlay.querySelector('#kg-jenis').value,
+        kategori_ruang: overlay.querySelector('#kg-kategori').value || null,
+        sub_kegiatan: subKegiatan || null,
+        sta_awal: overlay.querySelector('#kg-sta-awal').value || null,
+        sta_akhir: overlay.querySelector('#kg-sta-akhir').value || null,
+        foto_awal_path: fotoAwalPath,
+        foto_akhir_path: fotoAkhirPath,
+        tanggal_mulai: tglMulai || null,
+        tanggal_selesai: overlay.querySelector('#kg-tgl-selesai').value || null,
+        tahun_anggaran: tglMulai ? new Date(tglMulai).getFullYear() : new Date().getFullYear(),
+        status_pekerjaan: overlay.querySelector('#kg-status').value,
+        sumber_dana: getSumberDana() || null,
+        nilai_pci: overlay.querySelector('#kg-pci').value || null,
+        nilai_sdi: overlay.querySelector('#kg-sdi').value || null,
+        nilai_ikp: overlay.querySelector('#kg-ikp').value || null,
+        kondisi_hasil: overlay.querySelector('#kg-kondisi-hasil').value || null,
+        rekomendasi: overlay.querySelector('#kg-rekomendasi').value || null,
+        volume: overlay.querySelector('#kg-volume').value || null,
+        satuan: overlay.querySelector('#kg-satuan').value || null,
+        biaya: overlay.querySelector('#kg-biaya').value || null,
+        kontraktor_pelaksana: overlay.querySelector('#kg-kontraktor').value || null,
+        link_dokumentasi: overlay.querySelector('#kg-link').value || null,
+        deskripsi: overlay.querySelector('#kg-deskripsi').value || null,
+        kejadian_bencana_id: overlay.querySelector('#kg-jenis').value === 'tanggap_darurat' ? (overlay.querySelector('#kg-bencana').value || null) : null,
+      };
+      if(isEdit){ payload.segmen_id = editData?.segmen_id ?? null; }
       if(isEdit){ await api.updatePenanganan(editData.id, payload); }
       else{ payload.created_by = state.user.id; await api.insertPenanganan(payload); }
       overlay.remove();
       if(onSaved) onSaved(); else viewKegiatan();
-    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
+    }catch(err){
+      submitBtn.textContent = submitLabel; submitBtn.disabled = false;
+      errBox.textContent = err.message; errBox.classList.remove('hidden');
+    }
   });
 }
 
@@ -1040,11 +1194,23 @@ function openKegiatanDetailModal(kg){
     ${kg.kejadian_bencana_id?`<div class="mb-3 text-[13px] bg-[#FBE4E4] rounded-lg px-3 py-2"><span class="text-[var(--bad)] font-semibold">⚠ Menangani kejadian bencana</span><div class="text-ink-600 mt-0.5 capitalize">${(kg.bencana_jenis_kejadian||'—').replaceAll('_',' ')} · ${fmtDate(kg.bencana_tanggal_kejadian)}</div></div>`:''}
     ${kg.rekomendasi?`<div class="mb-3 text-[13px]"><span class="text-ink-400">Rekomendasi</span><p class="text-ink-600 mt-0.5">${kg.rekomendasi}</p></div>`:''}
     ${kg.keterangan?`<div class="mb-4 text-[13px]"><span class="text-ink-400">Deskripsi</span><p class="text-ink-600 mt-0.5">${kg.keterangan}</p></div>`:''}
+    ${(kg.foto_awal_path||kg.foto_akhir_path)? `<div class="mb-4">
+      <span class="text-[13px] text-ink-400">Foto Dokumentasi</span>
+      <div class="grid grid-cols-2 gap-3 mt-1.5">
+        ${kg.foto_awal_path? `<div><div class="text-[11.5px] text-ink-400 mb-1">STA Awal</div>${fotoThumbHtml(kg.foto_awal_path,'w-full h-32')}</div>`:''}
+        ${kg.foto_akhir_path? `<div><div class="text-[11.5px] text-ink-400 mb-1">STA Akhir</div>${fotoThumbHtml(kg.foto_akhir_path,'w-full h-32')}</div>`:''}
+      </div>
+    </div>`:''}
     <h4 class="font-display font-bold text-[14px] mb-2">Kelengkapan Dokumen</h4>
     <div id="dok-matrix" class="text-[13px]"><div class="skel h-32 w-full"></div></div>
   `);
   overlay.querySelector('div.card').classList.add('!max-w-2xl');
   overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+  hydrateFotoThumbs(overlay);
+  overlay.querySelectorAll('img[data-foto-path]').forEach(img=>{
+    img.classList.add('cursor-zoom-in');
+    img.addEventListener('click', ()=>{ if(img.src) window.open(img.src, '_blank'); });
+  });
 
   api.dokumenMatrix(kg.id).then(rows=>{
     const box = overlay.querySelector('#dok-matrix');
@@ -1223,7 +1389,7 @@ async function viewKegiatan(){
       <select id="fk-status" class="max-w-[180px]"><option value="">Semua Status</option>${STATUS_PEKERJAAN_OPT.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
     </div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th>Ruas</th><th>Jenis</th><th>Sub Kegiatan</th><th>Tanggal</th><th>Biaya</th><th>Status</th>${isEditor()?'<th>Aksi</th>':''}</tr></thead>
+      <table><thead><tr><th>Foto</th><th>Ruas</th><th>Jenis</th><th>Sub Kegiatan</th><th>Tanggal</th><th>Biaya</th><th>Status</th>${isEditor()?'<th>Aksi</th>':''}</tr></thead>
       <tbody id="kegiatan-tbody"></tbody></table>
     </div>
     <div id="kegiatan-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Belum ada kegiatan penanganan yang tercatat.</div>`;
@@ -1241,6 +1407,7 @@ async function viewKegiatan(){
       const tbody = document.getElementById('kegiatan-tbody');
       tbody.innerHTML = rows.map(k=>`
         <tr class="row-hover" data-id="${k.id}">
+          <td>${fotoThumbHtml(k.foto_awal_path || k.foto_akhir_path)}</td>
           <td><span class="font-mono text-[12px] text-navy-700 font-semibold">${k.kode_ruas}</span><div class="text-[12.5px]">${k.nama_ruas}</div></td>
           <td class="capitalize">${(k.jenis_penanganan||'—').replaceAll('_',' ')}${k.kejadian_bencana_id?` <span class="text-[var(--bad)]" title="Menangani kejadian bencana: ${(k.bencana_jenis_kejadian||'—').replaceAll('_',' ')} · ${fmtDate(k.bencana_tanggal_kejadian)}">⚠</span>`:''}</td>
           <td class="text-ink-500 text-[12.5px] max-w-[220px] truncate">${k.sub_kegiatan||'—'}</td>
@@ -1250,6 +1417,7 @@ async function viewKegiatan(){
           ${isEditor()?`<td>${actionBtns({onDetail:true, onEdit:true, onDelete:isAdmin()})}</td>`:''}
         </tr>`).join('');
       document.getElementById('kegiatan-empty').classList.toggle('hidden', rows.length>0);
+      hydrateFotoThumbs(tbody);
       tbody.querySelectorAll('tr').forEach(tr=>{
         const kg = kegiatan.find(k=>k.id===tr.dataset.id);
         tr.addEventListener('click', ()=>openKegiatanDetailModal(kg));
