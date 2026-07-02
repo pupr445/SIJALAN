@@ -1250,6 +1250,7 @@ function openKegiatanDetailModal(kg){
         ${kg.foto_akhir_path? `<div><div class="text-[11.5px] text-ink-400 mb-1">STA Akhir</div>${fotoThumbHtml(kg.foto_akhir_path,'w-full h-32')}</div>`:''}
       </div>
     </div>`:''}
+    ${kg.link_dokumentasi?`<div class="mb-4 text-[13px]"><span class="text-ink-400">Link Dokumentasi</span><div class="mt-0.5"><a href="${kg.link_dokumentasi}" target="_blank" class="text-navy-700 underline break-all">${kg.link_dokumentasi}</a></div></div>`:''}
     <h4 class="font-display font-bold text-[14px] mb-2">Kelengkapan Dokumen</h4>
     <div id="dok-matrix" class="text-[13px]"><div class="skel h-32 w-full"></div></div>
   `);
