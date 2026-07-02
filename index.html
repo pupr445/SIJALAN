@@ -146,7 +146,8 @@ async function uploadFotoKegiatan(file, ruasId, label){
   if(!file) return null;
   const ext = (file.name.split('.').pop()||'jpg').toLowerCase().replace(/[^a-z0-9]/g,'') || 'jpg';
   const path = `penanganan/${ruasId||'umum'}/${Date.now()}_${label}.${ext}`;
-  const {error} = await sb.storage.from(FOTO_BUCKET).upload(path, file, {upsert:false, cacheControl:'3600'});
+  const contentType = file.type && file.type.startsWith('image/') ? file.type : (ext==='png'?'image/png':ext==='webp'?'image/webp':ext==='gif'?'image/gif':'image/jpeg');
+  const {error} = await sb.storage.from(FOTO_BUCKET).upload(path, file, {upsert:false, cacheControl:'3600', contentType});
   if(error) throw error;
   return path;
 }
