@@ -159,6 +159,10 @@ const api = {
 
   // --- kejadian bencana ---
   async bencana(){ const {data,error} = await sb.from('kejadian_bencana').select('*, segmen_jalan(id, kode_segmen, ruas_jalan(nama_ruas, kode_ruas))').order('tanggal_kejadian',{ascending:false}).limit(100); if(error) throw error; return data; },
+  async bencanaByRuas(ruasId){
+    const {data,error} = await sb.from('kejadian_bencana').select('*, segmen_jalan!inner(id,kode_segmen,sta_awal,sta_akhir,ruas_id)').eq('segmen_jalan.ruas_id', ruasId).order('tanggal_kejadian',{ascending:false});
+    if(error) throw error; return data;
+  },
   async insertBencana(payload){ const {error} = await sb.from('kejadian_bencana').insert(payload); if(error) throw error; },
   async updateBencana(id, payload){ const {error} = await sb.from('kejadian_bencana').update(payload).eq('id',id); if(error) throw error; },
   async deleteBencana(id){ const {error} = await sb.from('kejadian_bencana').delete().eq('id',id); if(error) throw error; },
@@ -596,8 +600,8 @@ async function viewRuasDetail(id){
   try{
     const ruas = await api.ruasById(id);
     // Riwayat penanganan terkoneksi LANGSUNG ke master ruas (via ruas_id), bukan lewat kode_ruas/segmen.
-    const [segmen, kegiatan, survei, anggaran, ruasAll] = await Promise.all([
-      api.segmenByRuas(id), api.kegiatanByRuas(id), api.surveiByRuas(id), api.anggaranByRuas(id), api.ruasList()
+    const [segmen, kegiatan, survei, anggaran, ruasAll, bencana] = await Promise.all([
+      api.segmenByRuas(id), api.kegiatanByRuas(id), api.surveiByRuas(id), api.anggaranByRuas(id), api.ruasList(), api.bencanaByRuas(id)
     ]);
     state.ruasCache = ruasAll;
     v.innerHTML = `
@@ -648,6 +652,24 @@ async function viewRuasDetail(id){
               <div class="flex items-center gap-2 shrink-0">${badge(s.kondisi)}${isEditor()? actionBtns({onEdit:true, onDelete:isAdmin()}) : ''}</div>
             </div>`).join('') : `<p class="text-ink-400 text-[13px]">Belum ada survei kondisi.</p>`}</div>
         </div>
+        <div class="card p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-display font-bold text-[15px]">Riwayat Kejadian Bencana (${bencana.length})</h3>
+            ${isEditor()?`<button id="btn-add-bencana-ruas" class="text-navy-700 hover:text-navy-900" title="Tambah kejadian bencana">${icon('plus','w-4 h-4')}</button>`:''}
+          </div>
+          <div id="bencana-ruas-list">${bencana.length? bencana.map(b=>`
+            <div class="border-b border-line last:border-0 py-3 flex items-start justify-between gap-3" data-bid="${b.id}">
+              <div>
+                <div class="font-semibold text-[13.5px] capitalize">${(b.jenis_kejadian||'—').replaceAll('_',' ')} <span class="text-ink-400 font-normal">· ${fmtDate(b.tanggal_kejadian)}</span></div>
+                <div class="text-[12.5px] text-ink-500 mt-0.5">${b.segmen_jalan?.kode_segmen||'Segmen'} · STA ${fmtNum(b.segmen_jalan?.sta_awal,3)}–${fmtNum(b.segmen_jalan?.sta_akhir,3)}</div>
+                ${b.deskripsi? `<p class="text-[12.5px] text-ink-600 mt-1">${b.deskripsi}</p>`:''}
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                ${b.tingkat_kerusakan? `<span class="badge ${b.tingkat_kerusakan==='putus_total'||b.tingkat_kerusakan==='berat'?'badge-rusak_berat':'badge-sedang'} capitalize">${b.tingkat_kerusakan.replaceAll('_',' ')}</span>`:''}
+                ${isEditor()? actionBtns({onEdit:true, onDelete:isAdmin()}) : ''}
+              </div>
+            </div>`).join('') : `<p class="text-ink-400 text-[13px]">Belum ada kejadian bencana tercatat untuk ruas ini.</p>`}</div>
+        </div>
       </div>
       <div class="space-y-5">
         <div class="card p-5">
@@ -672,6 +694,7 @@ async function viewRuasDetail(id){
       document.getElementById('btn-add-survei')?.addEventListener('click', ()=>openSurveiFormModal(ruas, segmen, null, ()=>viewRuasDetail(id)));
       document.getElementById('btn-add-kegiatan')?.addEventListener('click', ()=>openKegiatanFormModal(ruasAll, ruas, null, ()=>viewRuasDetail(id)));
       document.getElementById('btn-add-anggaran')?.addEventListener('click', ()=>openAnggaranFormModal(ruas, null, ()=>viewRuasDetail(id)));
+      document.getElementById('btn-add-bencana-ruas')?.addEventListener('click', ()=>openBencanaFormModal(ruasAll, null, ()=>viewRuasDetail(id), ruas.id));
     }
     // Kegiatan penanganan actions
     document.querySelectorAll('#kegiatan-list [data-kid]').forEach(row=>{
@@ -694,6 +717,15 @@ async function viewRuasDetail(id){
       row.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
         if(!(await confirmDelete('Hapus catatan survei kondisi ini?'))) return;
         try{ await api.deleteSurvei(sv.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+err.message); }
+      });
+    });
+    // Kejadian bencana actions (panel ruas)
+    document.querySelectorAll('#bencana-ruas-list [data-bid]').forEach(row=>{
+      const b = bencana.find(x=>x.id===row.dataset.bid);
+      row.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openBencanaFormModal(ruasAll, b, ()=>viewRuasDetail(id), ruas.id));
+      row.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
+        if(!(await confirmDelete('Hapus catatan kejadian bencana ini?'))) return;
+        try{ await api.deleteBencana(b.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+err.message); }
       });
     });
     // Anggaran actions
@@ -1037,7 +1069,7 @@ function openAnggaranFormModal(ruas, editData=null, onSaved=null){
 }
 
 // --- 11d. MODAL: KEJADIAN BENCANA --------------------------------------
-function openBencanaFormModal(ruasList, editData=null, onSaved=null){
+function openBencanaFormModal(ruasList, editData=null, onSaved=null, presetRuasId=null){
   const isEdit = !!editData;
   const overlay = openModal(`
     <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
@@ -1085,6 +1117,11 @@ function openBencanaFormModal(ruasList, editData=null, onSaved=null){
   if(editData){
     const ruasId = editData.segmen_jalan?.ruas_jalan? (ruasList.find(r=>r.kode_ruas===editData.segmen_jalan.ruas_jalan.kode_ruas)?.id) : null;
     if(ruasId){ overlay.querySelector('#bc-ruas').value = ruasId; loadSegmenOptions(ruasId, editData.segmen_id); }
+  } else if(presetRuasId){
+    const ruasSel = overlay.querySelector('#bc-ruas');
+    ruasSel.value = presetRuasId;
+    ruasSel.disabled = true;
+    loadSegmenOptions(presetRuasId, null);
   }
 
   overlay.querySelector('#form-bencana').addEventListener('submit', async (e)=>{
