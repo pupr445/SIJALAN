@@ -44,6 +44,7 @@
   .btn-ghost:hover{border-color:var(--navy-600); color:var(--navy-700);}
   input,select,textarea{background:#fff; border:1px solid var(--line); border-radius:8px; padding:8px 12px; font-size:14px; width:100%;}
   input:focus,select:focus,textarea:focus{outline:2px solid var(--navy-600); outline-offset:0; border-color:var(--navy-600);}
+  input[type=file]{width:100%; max-width:100%; padding:6px 8px; font-size:12px; box-sizing:border-box; overflow:hidden; text-overflow:ellipsis;}
   table{width:100%; border-collapse:collapse;}
   th{text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-500); padding:10px 14px; border-bottom:2px solid var(--line); white-space:nowrap;}
   td{padding:12px 14px; border-bottom:1px solid var(--line); font-size:14px; vertical-align:middle;}
@@ -156,9 +157,12 @@ async function signedFotoUrls(paths){
     const {data, error} = await sb.storage.from(FOTO_BUCKET).createSignedUrls(uniq, 3600);
     if(error) throw error;
     const map = {};
-    (data||[]).forEach(d=>{ if(d.signedUrl) map[d.path] = d.signedUrl; });
+    (data||[]).forEach(d=>{
+      if(d.signedUrl) map[d.path] = d.signedUrl;
+      else console.error('[foto] gagal buat signed URL untuk path:', d.path, d.error);
+    });
     return map;
-  }catch(e){ return {}; }
+  }catch(e){ console.error('[foto] createSignedUrls error:', e); return {}; }
 }
 function fotoThumbHtml(path, cls='w-10 h-10'){
   if(!path) return `<div class="${cls} rounded-lg bg-[#EEF1F6] flex items-center justify-center text-ink-400 shrink-0">${icon('image','w-4 h-4')}</div>`;
@@ -1030,7 +1034,7 @@ function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=nul
               <div id="kg-foto-awal-ph" class="w-14 h-14 rounded-lg bg-[#EEF1F6] flex items-center justify-center text-ink-400 ${editData?.foto_awal_path?'hidden':''}">${icon('camera','w-5 h-5')}</div>
               <img id="kg-foto-awal-preview" data-foto-path="${editData?.foto_awal_path||''}" class="w-14 h-14 rounded-lg object-cover ${editData?.foto_awal_path?'':'hidden'}" src="" alt="Foto STA Awal">
             </div>
-            <input id="kg-foto-awal" type="file" accept="image/*" capture="environment" class="!py-1.5 text-[12px]">
+            <input id="kg-foto-awal" type="file" accept="image/*" capture="environment" class="!py-1.5 text-[12px] flex-1 min-w-0">
           </div>
         </div>
         <div>
@@ -1040,7 +1044,7 @@ function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=nul
               <div id="kg-foto-akhir-ph" class="w-14 h-14 rounded-lg bg-[#EEF1F6] flex items-center justify-center text-ink-400 ${editData?.foto_akhir_path?'hidden':''}">${icon('camera','w-5 h-5')}</div>
               <img id="kg-foto-akhir-preview" data-foto-path="${editData?.foto_akhir_path||''}" class="w-14 h-14 rounded-lg object-cover ${editData?.foto_akhir_path?'':'hidden'}" src="" alt="Foto STA Akhir">
             </div>
-            <input id="kg-foto-akhir" type="file" accept="image/*" capture="environment" class="!py-1.5 text-[12px]">
+            <input id="kg-foto-akhir" type="file" accept="image/*" capture="environment" class="!py-1.5 text-[12px] flex-1 min-w-0">
           </div>
         </div>
       </div>
