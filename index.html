@@ -84,26 +84,6 @@ const KONDISI_LABEL = {baik:'Baik', sedang:'Sedang', rusak_ringan:'Rusak Ringan'
 const KONDISI_ORDER = ['rusak_berat','rusak_ringan','sedang','baik'];
 const KONDISI_COLOR = {baik:'#2E8B57', sedang:'#E8A33D', rusak_ringan:'#E0672B', rusak_berat:'#C43D3D'};
 const ROLE_LABEL = {admin:'Administrator', kepala_bidang:'Kepala Bidang', petugas_lapangan:'Petugas Lapangan', viewer:'Peninjau'};
-const JENIS_PENANGANAN_LABEL = {pemeliharaan_rutin:'Pemeliharaan Rutin', pemeliharaan_berkala:'Pemeliharaan Berkala', rehabilitasi:'Rehabilitasi', peningkatan:'Peningkatan', pembangunan_baru:'Pembangunan Baru', tanggap_darurat:'Tanggap Darurat'};
-const KATEGORI_RUANG_LABEL = {rumija:'Rumija', rumaja:'Rumaja', ruwasja:'Ruwasja'};
-const SATUAN_LABEL = {m:'m', m2:'m²', m3:'m³', unit:'unit', ls:'ls'};
-const REKOMENDASI_MAP = {baik:'Pemeliharaan Rutin', sedang:'Pemeliharaan Berkala', rusak_ringan:'Rehabilitasi', rusak_berat:'Peningkatan'};
-// Estimasi kondisi & rekomendasi dari salah satu nilai PCI/SDI/IKP.
-// PCI & IKP: 0-100, makin tinggi makin baik. SDI: makin rendah makin baik.
-function estimasiKondisi(pci, sdi, ikp){
-  let val=null, mode=null;
-  if(pci!==null && pci!==undefined && pci!==''){ val=Number(pci); mode='pci'; }
-  else if(ikp!==null && ikp!==undefined && ikp!==''){ val=Number(ikp); mode='ikp'; }
-  else if(sdi!==null && sdi!==undefined && sdi!==''){ val=Number(sdi); mode='sdi'; }
-  if(val===null || isNaN(val)) return null;
-  let kondisi;
-  if(mode==='sdi'){
-    if(val<=25) kondisi='baik'; else if(val<=50) kondisi='sedang'; else if(val<=100) kondisi='rusak_ringan'; else kondisi='rusak_berat';
-  } else {
-    if(val>=85) kondisi='baik'; else if(val>=70) kondisi='sedang'; else if(val>=55) kondisi='rusak_ringan'; else kondisi='rusak_berat';
-  }
-  return {kondisi, rekomendasi: REKOMENDASI_MAP[kondisi]};
-}
 
 function isEditor(){ return state.profile && ['admin','kepala_bidang','petugas_lapangan'].includes(state.profile.role); }
 function isAdmin(){ return state.profile && state.profile.role === 'admin'; }
@@ -133,27 +113,77 @@ function wkbHexToLatLngs(hex){
 
 // --- 4. DATA LAYER (SUPABASE QUERIES) -------------------------------------
 const api = {
+  // --- referensi ---
   async kabupaten(){ const {data,error} = await sb.from('kabupaten').select('*').order('nama'); if(error) throw error; return data; },
+
+  // --- ruas jalan ---
   async ruasList(){ const {data,error} = await sb.from('ruas_jalan').select('*, kabupaten(id,nama)').order('nama_ruas'); if(error) throw error; return data; },
   async ruasById(id){ const {data,error} = await sb.from('ruas_jalan').select('*, kabupaten(id,nama)').eq('id',id).single(); if(error) throw error; return data; },
+  async insertRuas(payload){ const {error} = await sb.from('ruas_jalan').insert(payload); if(error) throw error; },
+  async updateRuas(id, payload){ const {error} = await sb.from('ruas_jalan').update(payload).eq('id',id); if(error) throw error; },
+  async deleteRuas(id){ const {error} = await sb.from('ruas_jalan').delete().eq('id',id); if(error) throw error; },
+
+  // --- segmen ---
   async segmenByRuas(ruasId){ const {data,error} = await sb.from('segmen_jalan').select('*').eq('ruas_id',ruasId).order('sta_awal'); if(error) throw error; return data; },
+
+  // --- kondisi / survei ---
   async kondisiTerkini(){ const {data,error} = await sb.from('v_kondisi_terkini').select('*'); if(error) throw error; return data; },
   async rekapKondisiKabupaten(){ const {data,error} = await sb.from('v_rekap_kondisi_kabupaten').select('*'); if(error) throw error; return data; },
+  async insertSurvei(payload){ const {error} = await sb.from('survei_kondisi').insert(payload); if(error) throw error; },
+  async updateSurvei(id, payload){ const {error} = await sb.from('survei_kondisi').update(payload).eq('id',id); if(error) throw error; },
+  async deleteSurvei(id){ const {error} = await sb.from('survei_kondisi').delete().eq('id',id); if(error) throw error; },
+  async surveiByRuas(ruasId){
+    const {data,error} = await sb.from('survei_kondisi').select('*, segmen_jalan!inner(id,kode_segmen,sta_awal,sta_akhir,ruas_id)').eq('segmen_jalan.ruas_id', ruasId).order('tanggal_survei',{ascending:false});
+    if(error) throw error; return data;
+  },
+
+  // --- anggaran ---
   async rekapAnggaran(){ const {data,error} = await sb.from('v_rekap_anggaran_tahun').select('*'); if(error) throw error; return data; },
-  async riwayatPenanganan(kodeRuas){ let q = sb.from('v_riwayat_penanganan').select('*'); if(kodeRuas) q = q.eq('kode_ruas', kodeRuas); const {data,error} = await q; if(error) throw error; return data; },
   async anggaranByRuas(ruasId){ const {data,error} = await sb.from('anggaran_tahunan').select('*').eq('ruas_id',ruasId).order('tahun',{ascending:false}); if(error) throw error; return data; },
-  async bencana(){ const {data,error} = await sb.from('kejadian_bencana').select('*, segmen_jalan(kode_segmen, ruas_jalan(nama_ruas, kode_ruas))').order('tanggal_kejadian',{ascending:false}).limit(50); if(error) throw error; return data; },
+  async insertAnggaran(payload){ const {error} = await sb.from('anggaran_tahunan').insert(payload); if(error) throw error; },
+  async updateAnggaran(id, payload){ const {error} = await sb.from('anggaran_tahunan').update(payload).eq('id',id); if(error) throw error; },
+  async deleteAnggaran(id){ const {error} = await sb.from('anggaran_tahunan').delete().eq('id',id); if(error) throw error; },
+
+  // --- kegiatan penanganan (terkoneksi langsung ke ruas_id) ---
+  async kegiatanList(){ const {data,error} = await sb.from('v_kegiatan_penanganan').select('*').order('tanggal_penanganan',{ascending:false}); if(error) throw error; return data; },
+  async kegiatanByRuas(ruasId){ const {data,error} = await sb.from('v_kegiatan_penanganan').select('*').eq('ruas_id', ruasId).order('tanggal_penanganan',{ascending:false}); if(error) throw error; return data; },
+  async penangananById(id){ const {data,error} = await sb.from('penanganan').select('*').eq('id',id).single(); if(error) throw error; return data; },
+  async insertPenanganan(payload){ const {data,error} = await sb.from('penanganan').insert(payload).select().single(); if(error) throw error; return data; },
+  async updatePenanganan(id, payload){ const {error} = await sb.from('penanganan').update(payload).eq('id',id); if(error) throw error; },
+  async deletePenanganan(id){ const {error} = await sb.from('penanganan').delete().eq('id',id); if(error) throw error; },
+  async subKegiatanRef(jenis){ const {data,error} = await sb.from('sub_kegiatan_ref').select('*').eq('jenis_penanganan',jenis).order('urutan'); if(error) throw error; return data; },
+
+  // --- dokumen kelengkapan kegiatan ---
+  async dokumenMatrix(penangananId){ const {data,error} = await sb.from('v_dokumen_matrix').select('*').eq('penanganan_id',penangananId).order('tahap_urutan').order('urutan_dokumen'); if(error) throw error; return data; },
+  async updateDokumen(id, payload){ const {error} = await sb.from('dokumen_kegiatan').update(payload).eq('id',id); if(error) throw error; },
+
+  // --- kejadian bencana ---
+  async bencana(){ const {data,error} = await sb.from('kejadian_bencana').select('*, segmen_jalan(id, kode_segmen, ruas_jalan(nama_ruas, kode_ruas))').order('tanggal_kejadian',{ascending:false}).limit(100); if(error) throw error; return data; },
+  async insertBencana(payload){ const {error} = await sb.from('kejadian_bencana').insert(payload); if(error) throw error; },
+  async updateBencana(id, payload){ const {error} = await sb.from('kejadian_bencana').update(payload).eq('id',id); if(error) throw error; },
+  async deleteBencana(id){ const {error} = await sb.from('kejadian_bencana').delete().eq('id',id); if(error) throw error; },
+
+  // --- aset jembatan ---
+  async jembatanList(){ const {data,error} = await sb.from('aset_jembatan').select('*, ruas_jalan(id,kode_ruas,nama_ruas)').order('nama_jembatan'); if(error) throw error; return data; },
+  async insertJembatan(payload){ const {error} = await sb.from('aset_jembatan').insert(payload); if(error) throw error; },
+  async updateJembatan(id, payload){ const {error} = await sb.from('aset_jembatan').update(payload).eq('id',id); if(error) throw error; },
+  async deleteJembatan(id){ const {error} = await sb.from('aset_jembatan').delete().eq('id',id); if(error) throw error; },
+
+  // --- aset drainase ---
+  async drainaseList(){ const {data,error} = await sb.from('aset_drainase').select('*, segmen_jalan(id,kode_segmen,ruas_jalan(id,kode_ruas,nama_ruas))').order('created_at',{ascending:false}); if(error) throw error; return data; },
+  async insertDrainase(payload){ const {error} = await sb.from('aset_drainase').insert(payload); if(error) throw error; },
+  async updateDrainase(id, payload){ const {error} = await sb.from('aset_drainase').update(payload).eq('id',id); if(error) throw error; },
+  async deleteDrainase(id){ const {error} = await sb.from('aset_drainase').delete().eq('id',id); if(error) throw error; },
+
+  // --- perlengkapan jalan ---
+  async perlengkapanList(){ const {data,error} = await sb.from('perlengkapan_jalan').select('*, segmen_jalan(id,kode_segmen,ruas_jalan(id,kode_ruas,nama_ruas))').order('created_at',{ascending:false}); if(error) throw error; return data; },
+  async insertPerlengkapan(payload){ const {error} = await sb.from('perlengkapan_jalan').insert(payload); if(error) throw error; },
+  async updatePerlengkapan(id, payload){ const {error} = await sb.from('perlengkapan_jalan').update(payload).eq('id',id); if(error) throw error; },
+  async deletePerlengkapan(id){ const {error} = await sb.from('perlengkapan_jalan').delete().eq('id',id); if(error) throw error; },
+
+  // --- pengguna ---
   async profiles(){ const {data,error} = await sb.from('profiles').select('*, kabupaten(nama)').order('created_at'); if(error) throw error; return data; },
   async updateRole(id, role){ const {error} = await sb.from('profiles').update({role}).eq('id',id); if(error) throw error; },
-  async insertRuas(payload){ const {error} = await sb.from('ruas_jalan').insert(payload); if(error) throw error; },
-  async insertSurvei(payload){ const {error} = await sb.from('survei_kondisi').insert(payload); if(error) throw error; },
-  async subKegiatanRef(jenis){ const {data,error} = await sb.from('sub_kegiatan_ref').select('*').eq('jenis_penanganan',jenis).order('urutan'); if(error) throw error; return data; },
-  async kegiatanList(){ const {data,error} = await sb.from('v_kegiatan_penanganan').select('*'); if(error) throw error; return data; },
-  async insertKegiatan(payload){ const {data,error} = await sb.from('penanganan').insert(payload).select().single(); if(error) throw error; return data; },
-  async uploadFoto(file, folder){ const path = `${folder}/${Date.now()}_${file.name}`.replace(/\s+/g,'_'); const {error} = await sb.storage.from('dokumentasi-jalan').upload(path, file); if(error) throw error; return path; },
-  async dokumenMatrix(){ const {data,error} = await sb.from('v_dokumen_matrix').select('*'); if(error) throw error; return data; },
-  async tahapList(){ const {data,error} = await sb.from('tahap_kegiatan').select('*').order('urutan'); if(error) throw error; return data; },
-  async updateDokumen(id, payload){ const {error} = await sb.from('dokumen_kegiatan').update(payload).eq('id',id); if(error) throw error; },
 };
 
 // --- 5. AUTH ---------------------------------------------------------------
@@ -178,7 +208,8 @@ const NAV_ITEMS = [
   {id:'peta', label:'Peta Jaringan', icon:'map'},
   {id:'ruas', label:'Ruas Jalan', icon:'road'},
   {id:'kegiatan', label:'Kegiatan Penanganan', icon:'wrench'},
-  {id:'dokumen', label:'Dokumen', icon:'file'},
+  {id:'dokumen', label:'Dokumen', icon:'doc'},
+  {id:'aset', label:'Aset', icon:'bridge'},
   {id:'anggaran', label:'Anggaran', icon:'wallet'},
   {id:'bencana', label:'Kejadian Bencana', icon:'alert'},
 ];
@@ -190,9 +221,23 @@ const ICONS = {
   alert:'<path d="M12 3 2 20h20L12 3Z"/><path d="M12 10v4M12 17h.01"/>',
   logout:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/>',
   user:'<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/>',
-  wrench:'<path d="M14.7 6.3a4 4 0 0 0-5.6 5.6L3 18v3h3l6.1-6.1a4 4 0 0 0 5.6-5.6l-2.7 2.7-2-2 2.7-2.7Z"/>',
-  file:'<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/>',
+  wrench:'<path d="M14.7 6.3a4 4 0 0 0-5.6 4.9L3 17.3V21h3.7l6.1-6.1a4 4 0 0 0 4.9-5.6l-2.6 2.6-2.1-2.1 2.7-2.5Z"/>',
+  edit:'<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  trash:'<path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  doc:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/>',
+  check:'<path d="M20 6 9 17l-5-5"/>',
+  bridge:'<path d="M2 20h20M4 20v-6M8 20v-9M12 20v-11M16 20v-9M20 20v-6M2 11c4-4.5 16-4.5 20 0"/>',
 };
+function actionBtns({onEdit, onDelete, onDetail}={}){
+  let html = '<div class="flex items-center gap-1.5" onclick="event.stopPropagation()">';
+  if(onDetail) html += `<button data-act="detail" class="p-1.5 rounded-md hover:bg-[#EEF1F6] text-navy-700" title="Detail">${icon('doc','w-4 h-4')}</button>`;
+  if(onEdit) html += `<button data-act="edit" class="p-1.5 rounded-md hover:bg-[#EEF1F6] text-navy-700" title="Ubah">${icon('edit','w-4 h-4')}</button>`;
+  if(onDelete) html += `<button data-act="delete" class="p-1.5 rounded-md hover:bg-[#FBE4E4] text-[var(--bad)]" title="Hapus">${icon('trash','w-4 h-4')}</button>`;
+  html += '</div>';
+  return html;
+}
+async function confirmDelete(msg){ return window.confirm(msg || 'Yakin ingin menghapus data ini? Tindakan ini tidak dapat dibatalkan.'); }
 function icon(name, cls='w-5 h-5'){ return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||''}</svg>`; }
 
 function renderShell(){
@@ -233,7 +278,7 @@ function renderShell(){
 }
 
 function routeView(){
-  const map = {dashboard:viewDashboard, peta:viewPeta, ruas:viewRuas, kegiatan:viewKegiatan, dokumen:viewDokumen, anggaran:viewAnggaran, bencana:viewBencana, admin:viewAdmin};
+  const map = {dashboard:viewDashboard, peta:viewPeta, ruas:viewRuas, kegiatan:viewKegiatan, dokumen:viewDokumen, aset:viewAset, anggaran:viewAnggaran, bencana:viewBencana, admin:viewAdmin};
   (map[state.route]||viewDashboard)();
 }
 
@@ -498,7 +543,7 @@ async function viewRuas(){
       <select id="f-kondisi" class="max-w-[180px]"><option value="">Semua Kondisi</option>${KONDISI_ORDER.map(k=>`<option value="${k}">${KONDISI_LABEL[k]}</option>`).join('')}</select>
     </div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th>Kode</th><th>Nama Ruas</th><th>Kab/Kota</th><th>Status</th><th>Panjang</th><th>Kondisi</th></tr></thead>
+      <table><thead><tr><th>Kode</th><th>Nama Ruas</th><th>Kab/Kota</th><th>Status</th><th>Panjang</th><th>Kondisi</th>${isEditor()?'<th>Aksi</th>':''}</tr></thead>
       <tbody id="ruas-tbody"></tbody></table>
     </div>
     <div id="ruas-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada ruas yang cocok dengan filter.</div>`;
@@ -524,9 +569,20 @@ async function viewRuas(){
           <td class="capitalize text-ink-500">${r.status_jalan||'—'}</td>
           <td class="font-mono">${fmtNum(r.panjang_km,1)} km</td>
           <td>${badge(worstByRuas[r.id])}</td>
+          ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
         </tr>`).join('');
       document.getElementById('ruas-empty').classList.toggle('hidden', rows.length>0);
-      tbody.querySelectorAll('tr').forEach(tr=>tr.addEventListener('click', ()=>{ state.selectedRuasId = tr.dataset.id; renderShell(); }));
+      tbody.querySelectorAll('tr').forEach(tr=>{
+        tr.addEventListener('click', ()=>{ state.selectedRuasId = tr.dataset.id; renderShell(); });
+        tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>{
+          const r = ruas.find(x=>x.id===tr.dataset.id); openRuasFormModal(kabupaten, r);
+        });
+        tr.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
+          const r = ruas.find(x=>x.id===tr.dataset.id);
+          if(!(await confirmDelete(`Hapus ruas "${r.nama_ruas}" beserta seluruh data terkait (segmen, survei, penanganan)?`))) return;
+          try{ await api.deleteRuas(r.id); viewRuas(); }catch(err){ alert('Gagal menghapus: '+err.message); }
+        });
+      });
     }
     ['f-search','f-kabupaten','f-status','f-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
     renderRows();
@@ -539,7 +595,11 @@ async function viewRuasDetail(id){
   v.innerHTML = `<div class="skel h-8 w-40 mb-4"></div><div class="skel h-64 w-full"></div>`;
   try{
     const ruas = await api.ruasById(id);
-    const [segmen, riwayat, anggaran] = await Promise.all([api.segmenByRuas(id), api.riwayatPenanganan(ruas.kode_ruas), api.anggaranByRuas(id)]);
+    // Riwayat penanganan terkoneksi LANGSUNG ke master ruas (via ruas_id), bukan lewat kode_ruas/segmen.
+    const [segmen, kegiatan, survei, anggaran, ruasAll] = await Promise.all([
+      api.segmenByRuas(id), api.kegiatanByRuas(id), api.surveiByRuas(id), api.anggaranByRuas(id), api.ruasList()
+    ]);
+    state.ruasCache = ruasAll;
     v.innerHTML = `
     <button id="back-ruas" class="btn-ghost !py-1.5 !px-3 text-[12.5px] mb-4">← Kembali ke daftar ruas</button>
     <div class="flex items-start justify-between flex-wrap gap-3 mb-6">
@@ -548,7 +608,7 @@ async function viewRuasDetail(id){
         <h1 class="font-display font-extrabold text-2xl text-ink-900 mt-0.5">${ruas.nama_ruas}</h1>
         <p class="text-ink-500 text-[13.5px] mt-1">${ruas.kabupaten?.nama||'—'} · <span class="capitalize">${ruas.status_jalan||'—'}</span> · ${ruas.fungsi_jalan? 'Fungsi '+ruas.fungsi_jalan : ''} · ${fmtNum(ruas.panjang_km,1)} km</p>
       </div>
-      ${isEditor()?`<button id="btn-add-survei" class="btn-primary">+ Input Survei Kondisi</button>`:''}
+      ${isEditor()?`<div class="flex gap-2"><button id="btn-add-survei" class="btn-ghost">+ Survei Kondisi</button><button id="btn-add-kegiatan" class="btn-primary">+ Kegiatan Penanganan</button></div>`:''}
     </div>
 
     <div class="grid lg:grid-cols-3 gap-5">
@@ -560,417 +620,657 @@ async function viewRuasDetail(id){
           </tbody></table>` : `<p class="text-ink-400 text-[13px]">Belum ada data segmen untuk ruas ini.</p>`}
         </div>
         <div class="card p-5">
-          <h3 class="font-display font-bold text-[15px] mb-3">Riwayat Penanganan</h3>
-          ${riwayat.length? riwayat.map(r=>`
-            <div class="border-b border-line last:border-0 py-3 flex items-start justify-between gap-3">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-display font-bold text-[15px]">Riwayat Penanganan (${kegiatan.length})</h3>
+            <span class="text-[11px] text-ink-400">Terhubung langsung ke ruas ${ruas.kode_ruas}</span>
+          </div>
+          <div id="kegiatan-list">${kegiatan.length? kegiatan.map(r=>`
+            <div class="border-b border-line last:border-0 py-3 flex items-start justify-between gap-3 row-hover cursor-pointer" data-kid="${r.id}">
               <div>
-                <div class="font-semibold text-[13.5px] capitalize">${r.jenis_penanganan.replaceAll('_',' ')} <span class="text-ink-400 font-normal">· TA ${r.tahun_anggaran}</span></div>
-                <div class="text-[12.5px] text-ink-500 mt-0.5">STA ${fmtNum(r.sta_awal,3)}–${fmtNum(r.sta_akhir,3)} · ${fmtDate(r.tanggal_mulai)} s/d ${fmtDate(r.tanggal_selesai)}</div>
-                ${r.kontraktor? `<div class="text-[12px] text-ink-400 mt-0.5">Kontraktor: ${r.kontraktor} ${r.no_kontrak?'· '+r.no_kontrak:''} ${r.nilai_kontrak? '· '+fmtRp(r.nilai_kontrak):''}</div>`:''}
+                <div class="font-semibold text-[13.5px] capitalize">${(r.jenis_penanganan||'—').replaceAll('_',' ')} <span class="text-ink-400 font-normal">· TA ${new Date(r.tanggal_penanganan||r.created_at).getFullYear()}</span></div>
+                <div class="text-[12.5px] text-ink-500 mt-0.5">STA ${fmtNum(r.sta_awal,3)}–${fmtNum(r.sta_akhir,3)} · ${fmtDate(r.tanggal_penanganan)}</div>
+                ${r.sub_kegiatan? `<div class="text-[12px] text-ink-400 mt-0.5">${r.sub_kegiatan}</div>`:''}
+                ${r.kontraktor_pelaksana? `<div class="text-[12px] text-ink-400 mt-0.5">Pelaksana: ${r.kontraktor_pelaksana} ${r.biaya? '· '+fmtRp(r.biaya):''}</div>`:''}
               </div>
-              <span class="badge ${r.status_pekerjaan==='selesai'?'badge-baik':r.status_pekerjaan==='terhenti'?'badge-rusak_berat':'badge-sedang'} shrink-0 capitalize">${r.status_pekerjaan.replaceAll('_',' ')}</span>
-            </div>`).join('') : `<p class="text-ink-400 text-[13px]">Belum ada riwayat penanganan.</p>`}
+              <div class="flex items-center gap-2 shrink-0">
+                ${isEditor()? actionBtns({onDetail:true, onEdit:true, onDelete:isAdmin()}) : ''}
+              </div>
+            </div>`).join('') : `<p class="text-ink-400 text-[13px]">Belum ada kegiatan penanganan untuk ruas ini.</p>`}</div>
+        </div>
+        <div class="card p-5">
+          <h3 class="font-display font-bold text-[15px] mb-3">Riwayat Survei Kondisi (${survei.length})</h3>
+          <div id="survei-list">${survei.length? survei.map(s=>`
+            <div class="border-b border-line last:border-0 py-3 flex items-start justify-between gap-3" data-sid="${s.id}">
+              <div>
+                <div class="font-semibold text-[13.5px]">${s.segmen_jalan?.kode_segmen||'Segmen'} <span class="text-ink-400 font-normal">· ${fmtDate(s.tanggal_survei)}</span></div>
+                <div class="text-[12.5px] text-ink-500 mt-0.5">STA ${fmtNum(s.segmen_jalan?.sta_awal,3)}–${fmtNum(s.segmen_jalan?.sta_akhir,3)} ${s.nilai_iri?'· IRI '+fmtNum(s.nilai_iri,2):''} ${s.metode_survei?'· '+s.metode_survei.replaceAll('_',' '):''}</div>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">${badge(s.kondisi)}${isEditor()? actionBtns({onEdit:true, onDelete:isAdmin()}) : ''}</div>
+            </div>`).join('') : `<p class="text-ink-400 text-[13px]">Belum ada survei kondisi.</p>`}</div>
         </div>
       </div>
       <div class="space-y-5">
         <div class="card p-5">
-          <h3 class="font-display font-bold text-[15px] mb-3">Anggaran per Tahun</h3>
-          ${anggaran.length? anggaran.map(a=>`
-            <div class="flex justify-between items-center border-b border-line last:border-0 py-2.5">
-              <div><div class="font-semibold text-[13px]">${a.tahun}</div><div class="text-[11.5px] text-ink-400">${a.sumber_dana||'—'}</div></div>
-              <div class="text-right"><div class="font-mono text-[12.5px]">${fmtRp(a.realisasi)}</div><div class="text-[11px] text-ink-400">dari ${fmtRp(a.pagu)}</div></div>
-            </div>`).join('') : `<p class="text-ink-400 text-[13px]">Belum ada data anggaran.</p>`}
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-display font-bold text-[15px]">Anggaran per Tahun</h3>
+            ${isEditor()?`<button id="btn-add-anggaran" class="text-navy-700 hover:text-navy-900" title="Tambah anggaran">${icon('plus','w-4 h-4')}</button>`:''}
+          </div>
+          <div id="anggaran-list">${anggaran.length? anggaran.map(a=>`
+            <div class="flex justify-between items-center border-b border-line last:border-0 py-2.5" data-aid="${a.id}">
+              <div><div class="font-semibold text-[13px]">${a.tahun}</div><div class="text-[11.5px] text-ink-400">${(a.sumber_dana||'—').replaceAll('_',' ')}</div></div>
+              <div class="flex items-center gap-2">
+                <div class="text-right"><div class="font-mono text-[12.5px]">${fmtRp(a.realisasi)}</div><div class="text-[11px] text-ink-400">dari ${fmtRp(a.pagu)}</div></div>
+                ${isEditor()? actionBtns({onEdit:true, onDelete:isAdmin()}) : ''}
+              </div>
+            </div>`).join('') : `<p class="text-ink-400 text-[13px]">Belum ada data anggaran.</p>`}</div>
         </div>
         ${ruas.keterangan? `<div class="card p-5"><h3 class="font-display font-bold text-[15px] mb-2">Keterangan</h3><p class="text-[13px] text-ink-600">${ruas.keterangan}</p></div>`:''}
       </div>
     </div>`;
     document.getElementById('back-ruas').addEventListener('click', ()=>{ state.selectedRuasId=null; renderShell(); });
-    if(isEditor()){ document.getElementById('btn-add-survei')?.addEventListener('click', ()=>openSurveiFormModal(ruas, segmen)); }
+    if(isEditor()){
+      document.getElementById('btn-add-survei')?.addEventListener('click', ()=>openSurveiFormModal(ruas, segmen, null, ()=>viewRuasDetail(id)));
+      document.getElementById('btn-add-kegiatan')?.addEventListener('click', ()=>openKegiatanFormModal(ruasAll, ruas, null, ()=>viewRuasDetail(id)));
+      document.getElementById('btn-add-anggaran')?.addEventListener('click', ()=>openAnggaranFormModal(ruas, null, ()=>viewRuasDetail(id)));
+    }
+    // Kegiatan penanganan actions
+    document.querySelectorAll('#kegiatan-list [data-kid]').forEach(row=>{
+      const kg = kegiatan.find(k=>k.id===row.dataset.kid);
+      row.addEventListener('click', ()=>openKegiatanDetailModal(kg));
+      row.querySelector('[data-act="detail"]')?.addEventListener('click', ()=>openKegiatanDetailModal(kg));
+      row.querySelector('[data-act="edit"]')?.addEventListener('click', async ()=>{
+        try{ const full = await api.penangananById(kg.id); openKegiatanFormModal(ruasAll, ruas, {...kg, ...full}, ()=>viewRuasDetail(id)); }
+        catch(err){ alert('Gagal memuat data kegiatan: '+err.message); }
+      });
+      row.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
+        if(!(await confirmDelete('Hapus kegiatan penanganan ini beserta kelengkapan dokumennya?'))) return;
+        try{ await api.deletePenanganan(kg.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+err.message); }
+      });
+    });
+    // Survei kondisi actions
+    document.querySelectorAll('#survei-list [data-sid]').forEach(row=>{
+      const sv = survei.find(s=>s.id===row.dataset.sid);
+      row.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openSurveiFormModal(ruas, segmen, sv, ()=>viewRuasDetail(id)));
+      row.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
+        if(!(await confirmDelete('Hapus catatan survei kondisi ini?'))) return;
+        try{ await api.deleteSurvei(sv.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+err.message); }
+      });
+    });
+    // Anggaran actions
+    document.querySelectorAll('#anggaran-list [data-aid]').forEach(row=>{
+      const ag = anggaran.find(a=>a.id===row.dataset.aid);
+      row.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openAnggaranFormModal(ruas, ag, ()=>viewRuasDetail(id)));
+      row.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
+        if(!(await confirmDelete('Hapus data anggaran tahun ini?'))) return;
+        try{ await api.deleteAnggaran(ag.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+err.message); }
+      });
+    });
   }catch(err){ v.innerHTML = errorPanel(err); }
 }
 
 // --- 11. MODAL: TAMBAH RUAS -------------------------------------------
-function openModal(innerHtml, widthClass='max-w-lg'){
+function openModal(innerHtml){
   const overlay = el(`<div class="modal-overlay fixed inset-0 z-50 flex items-center justify-center p-4"></div>`);
-  overlay.innerHTML = `<div class="card w-full ${widthClass} max-h-[88vh] overflow-y-auto p-6 relative">${innerHtml}</div>`;
+  overlay.innerHTML = `<div class="card w-full max-w-lg max-h-[88vh] overflow-y-auto p-6 relative">${innerHtml}</div>`;
   overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.remove(); });
   document.body.appendChild(overlay);
   return overlay;
 }
-function openRuasFormModal(kabupaten){
+function openRuasFormModal(kabupaten, editData=null){
+  const isEdit = !!editData;
   const overlay = openModal(`
     <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
-    <h3 class="font-display font-extrabold text-lg mb-4">Tambah Ruas Jalan</h3>
+    <h3 class="font-display font-extrabold text-lg mb-4">${isEdit?'Ubah Ruas Jalan':'Tambah Ruas Jalan'}</h3>
     <form id="form-ruas" class="space-y-3">
-      <div><label class="text-[12.5px] font-semibold text-ink-600">Kode Ruas *</label><input id="rj-kode" required placeholder="mis. 001.023" class="font-mono"></div>
-      <div><label class="text-[12.5px] font-semibold text-ink-600">Nama Ruas *</label><input id="rj-nama" required placeholder="mis. Kupang – Oesao"></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Kode Ruas *</label><input id="rj-kode" required placeholder="mis. 001.023" class="font-mono" value="${editData?.kode_ruas||''}"></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Nama Ruas *</label><input id="rj-nama" required placeholder="mis. Kupang – Oesao" value="${editData?.nama_ruas||''}"></div>
       <div class="grid grid-cols-2 gap-3">
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Status Jalan *</label><select id="rj-status" required><option value="nasional">Nasional</option><option value="provinsi" selected>Provinsi</option><option value="kabupaten">Kabupaten</option></select></div>
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Fungsi Jalan</label><select id="rj-fungsi"><option value="">—</option><option value="arteri">Arteri</option><option value="kolektor">Kolektor</option><option value="lokal">Lokal</option></select></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Status Jalan *</label><select id="rj-status" required>
+          <option value="nasional" ${editData?.status_jalan==='nasional'?'selected':''}>Nasional</option>
+          <option value="provinsi" ${!editData||editData?.status_jalan==='provinsi'?'selected':''}>Provinsi</option>
+          <option value="kabupaten" ${editData?.status_jalan==='kabupaten'?'selected':''}>Kabupaten</option>
+        </select></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Fungsi Jalan</label><select id="rj-fungsi">
+          <option value="">—</option>
+          <option value="arteri" ${editData?.fungsi_jalan==='arteri'?'selected':''}>Arteri</option>
+          <option value="kolektor" ${editData?.fungsi_jalan==='kolektor'?'selected':''}>Kolektor</option>
+          <option value="lokal" ${editData?.fungsi_jalan==='lokal'?'selected':''}>Lokal</option>
+        </select></div>
       </div>
       <div class="grid grid-cols-2 gap-3">
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Panjang (km)</label><input id="rj-panjang" type="number" step="0.001" min="0"></div>
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Kabupaten/Kota *</label><select id="rj-kabupaten" required><option value="">Pilih…</option>${kabupaten.map(k=>`<option value="${k.id}">${k.nama}</option>`).join('')}</select></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Panjang (km)</label><input id="rj-panjang" type="number" step="0.001" min="0" value="${editData?.panjang_km??''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Kabupaten/Kota *</label><select id="rj-kabupaten" required><option value="">Pilih…</option>${kabupaten.map(k=>`<option value="${k.id}" ${editData?.kabupaten_id===k.id?'selected':''}>${k.nama}</option>`).join('')}</select></div>
       </div>
-      <div><label class="text-[12.5px] font-semibold text-ink-600">Keterangan</label><textarea id="rj-ket" rows="2"></textarea></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Keterangan</label><textarea id="rj-ket" rows="2">${editData?.keterangan||''}</textarea></div>
       <p class="text-[11.5px] text-ink-400">Geometri peta (garis rute) dapat ditambahkan kemudian melalui Table Editor Supabase atau alat GIS.</p>
       <div id="rj-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
-      <button type="submit" class="btn-primary w-full">Simpan Ruas Jalan</button>
+      <button type="submit" class="btn-primary w-full">${isEdit?'Simpan Perubahan':'Simpan Ruas Jalan'}</button>
     </form>`);
   overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
   overlay.querySelector('#form-ruas').addEventListener('submit', async (e)=>{
     e.preventDefault();
     const errBox = overlay.querySelector('#rj-err');
+    const payload = {
+      kode_ruas: overlay.querySelector('#rj-kode').value,
+      nama_ruas: overlay.querySelector('#rj-nama').value,
+      status_jalan: overlay.querySelector('#rj-status').value,
+      fungsi_jalan: overlay.querySelector('#rj-fungsi').value || null,
+      panjang_km: overlay.querySelector('#rj-panjang').value || null,
+      kabupaten_id: overlay.querySelector('#rj-kabupaten').value,
+      keterangan: overlay.querySelector('#rj-ket').value || null,
+    };
     try{
-      await api.insertRuas({
-        kode_ruas: overlay.querySelector('#rj-kode').value,
-        nama_ruas: overlay.querySelector('#rj-nama').value,
-        status_jalan: overlay.querySelector('#rj-status').value,
-        fungsi_jalan: overlay.querySelector('#rj-fungsi').value || null,
-        panjang_km: overlay.querySelector('#rj-panjang').value || null,
-        kabupaten_id: overlay.querySelector('#rj-kabupaten').value,
-        keterangan: overlay.querySelector('#rj-ket').value || null,
-        created_by: state.user.id,
-      });
-      overlay.remove(); viewRuas();
+      if(isEdit){ await api.updateRuas(editData.id, payload); }
+      else{ payload.created_by = state.user.id; await api.insertRuas(payload); }
+      overlay.remove();
+      if(isEdit && state.selectedRuasId===editData.id){ viewRuasDetail(editData.id); } else { viewRuas(); }
     }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
   });
 }
-function openSurveiFormModal(ruas, segmenList){
+function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
+  const isEdit = !!editData;
+  const currentSegId = editData?.segmen_id || editData?.segmen_jalan?.id;
   const overlay = openModal(`
     <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
-    <h3 class="font-display font-extrabold text-lg mb-1">Input Survei Kondisi</h3>
+    <h3 class="font-display font-extrabold text-lg mb-1">${isEdit?'Ubah Survei Kondisi':'Input Survei Kondisi'}</h3>
     <p class="text-[13px] text-ink-500 mb-4">${ruas.kode_ruas} · ${ruas.nama_ruas}</p>
     <form id="form-survei" class="space-y-3">
       <div><label class="text-[12.5px] font-semibold text-ink-600">Segmen *</label>
-        <select id="sv-segmen" required>${segmenList.length? segmenList.map(s=>`<option value="${s.id}">${s.kode_segmen||'Segmen'} (STA ${fmtNum(s.sta_awal,3)}–${fmtNum(s.sta_akhir,3)})</option>`).join('') : `<option value="">Belum ada segmen</option>`}</select></div>
+        <select id="sv-segmen" required>${segmenList.length? segmenList.map(s=>`<option value="${s.id}" ${currentSegId===s.id?'selected':''}>${s.kode_segmen||'Segmen'} (STA ${fmtNum(s.sta_awal,3)}–${fmtNum(s.sta_akhir,3)})</option>`).join('') : `<option value="">Belum ada segmen</option>`}</select></div>
       <div class="grid grid-cols-2 gap-3">
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Tanggal Survei *</label><input id="sv-tanggal" type="date" required></div>
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Kondisi *</label><select id="sv-kondisi" required>${KONDISI_ORDER.map(k=>`<option value="${k}">${KONDISI_LABEL[k]}</option>`).join('')}</select></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Tanggal Survei *</label><input id="sv-tanggal" type="date" required value="${editData?.tanggal_survei||''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Kondisi *</label><select id="sv-kondisi" required>${KONDISI_ORDER.map(k=>`<option value="${k}" ${editData?.kondisi===k?'selected':''}>${KONDISI_LABEL[k]}</option>`).join('')}</select></div>
       </div>
       <div class="grid grid-cols-2 gap-3">
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Nilai IRI</label><input id="sv-iri" type="number" step="0.01" min="0"></div>
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Metode Survei</label><select id="sv-metode"><option value="visual">Visual</option><option value="alat_ukur">Alat Ukur</option><option value="drone">Drone</option><option value="lainnya">Lainnya</option></select></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Nilai IRI</label><input id="sv-iri" type="number" step="0.01" min="0" value="${editData?.nilai_iri??''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Metode Survei</label><select id="sv-metode">
+          <option value="visual" ${!editData||editData?.metode_survei==='visual'?'selected':''}>Visual</option>
+          <option value="alat_ukur" ${editData?.metode_survei==='alat_ukur'?'selected':''}>Alat Ukur</option>
+          <option value="drone" ${editData?.metode_survei==='drone'?'selected':''}>Drone</option>
+          <option value="lainnya" ${editData?.metode_survei==='lainnya'?'selected':''}>Lainnya</option>
+        </select></div>
       </div>
-      <div><label class="text-[12.5px] font-semibold text-ink-600">Catatan</label><textarea id="sv-catatan" rows="2"></textarea></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Catatan</label><textarea id="sv-catatan" rows="2">${editData?.catatan||''}</textarea></div>
       <div id="sv-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
-      <button type="submit" class="btn-primary w-full" ${segmenList.length?'':'disabled'}>Simpan Survei</button>
+      <button type="submit" class="btn-primary w-full" ${segmenList.length?'':'disabled'}>${isEdit?'Simpan Perubahan':'Simpan Survei'}</button>
     </form>`);
   overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
   overlay.querySelector('#form-survei').addEventListener('submit', async (e)=>{
     e.preventDefault();
     const errBox = overlay.querySelector('#sv-err');
+    const payload = {
+      segmen_id: overlay.querySelector('#sv-segmen').value,
+      tanggal_survei: overlay.querySelector('#sv-tanggal').value,
+      kondisi: overlay.querySelector('#sv-kondisi').value,
+      nilai_iri: overlay.querySelector('#sv-iri').value || null,
+      metode_survei: overlay.querySelector('#sv-metode').value,
+      catatan: overlay.querySelector('#sv-catatan').value || null,
+    };
     try{
-      await api.insertSurvei({
-        segmen_id: overlay.querySelector('#sv-segmen').value,
-        tanggal_survei: overlay.querySelector('#sv-tanggal').value,
-        kondisi: overlay.querySelector('#sv-kondisi').value,
-        nilai_iri: overlay.querySelector('#sv-iri').value || null,
-        metode_survei: overlay.querySelector('#sv-metode').value,
-        catatan: overlay.querySelector('#sv-catatan').value || null,
-        created_by: state.user.id,
-      });
-      overlay.remove(); viewRuasDetail(ruas.id);
+      if(isEdit){ await api.updateSurvei(editData.id, payload); }
+      else{ payload.created_by = state.user.id; await api.insertSurvei(payload); }
+      overlay.remove();
+      if(onSaved) onSaved(); else viewRuasDetail(ruas.id);
     }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
   });
 }
 
-// --- 11b. VIEW: KEGIATAN PENANGANAN ---------------------------------------
-async function viewKegiatan(){
-  const v = document.getElementById('view');
-  v.innerHTML = `<div class="skel h-10 w-full mb-4"></div><div class="skel h-96 w-full"></div>`;
-  try{
-    const [rows, ruas] = await Promise.all([api.kegiatanList(), state.ruasCache.length? Promise.resolve(state.ruasCache) : api.ruasList()]);
-    state.ruasCache = ruas.length ? ruas : state.ruasCache;
-    v.innerHTML = `
-    <div class="flex items-start justify-between flex-wrap gap-3 mb-1">
-      <div><h1 class="font-display font-extrabold text-2xl text-ink-900">Kegiatan Penanganan</h1>
-      <p class="text-ink-500 text-[13.5px]">Riwayat kegiatan pemeliharaan, rehabilitasi, dan peningkatan jalan.</p></div>
-      ${isEditor()?`<button id="btn-add-kegiatan" class="btn-primary">+ Tambah Kegiatan Penanganan</button>`:''}
-    </div>
-    <input id="kg-search" placeholder="Cari ruas / sub kegiatan…" class="max-w-sm mb-4 mt-3">
-    <div class="card overflow-x-auto">
-      <table><thead><tr>
-        <th>Tanggal</th><th>Ruas</th><th>Jenis Kegiatan</th><th>Sub Kegiatan</th><th>Kategori Ruang</th>
-        <th>STA Awal</th><th>STA Akhir</th><th>PCI/SDI/IKP</th><th>Kondisi Hasil</th><th>Rekomendasi</th>
-        <th>Volume</th><th>Satuan</th><th>Biaya</th><th>Sumber Dana</th><th>Kontraktor/Pelaksana</th>
-      </tr></thead><tbody id="kg-tbody"></tbody></table>
-    </div>
-    <div id="kg-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Belum ada kegiatan penanganan yang cocok.</div>`;
+// --- 11b. MODAL: KEGIATAN PENANGANAN (terhubung langsung ke ruas_id) -------
+const JENIS_PENANGANAN_OPT = [
+  ['pemeliharaan_rutin','Pemeliharaan Rutin'],['pemeliharaan_berkala','Pemeliharaan Berkala'],
+  ['rehabilitasi','Rehabilitasi'],['peningkatan','Peningkatan'],
+  ['pembangunan_baru','Pembangunan Baru'],['tanggap_darurat','Tanggap Darurat'],
+];
+const STATUS_PEKERJAAN_OPT = [
+  ['perencanaan','Perencanaan'],['proses_lelang','Proses Lelang'],['dalam_pengerjaan','Dalam Pengerjaan'],
+  ['selesai','Selesai'],['terhenti','Terhenti'],
+];
+const SUMBER_DANA_OPT = [['APBD_Provinsi','APBD Provinsi'],['APBN','APBN'],['DAK','DAK'],['Hibah','Hibah'],['Lainnya','Lainnya']];
+const SATUAN_OPT = ['m','m2','m3','unit','ls'];
 
-    function renderRows(){
-      const q = document.getElementById('kg-search').value.toLowerCase();
-      const filtered = rows.filter(r=> !q || (r.nama_ruas||'').toLowerCase().includes(q) || (r.sub_kegiatan||'').toLowerCase().includes(q));
-      document.getElementById('kg-tbody').innerHTML = filtered.map(r=>`
-        <tr>
-          <td class="whitespace-nowrap">${fmtDate(r.tanggal_penanganan)}</td>
-          <td class="font-medium">${r.nama_ruas}</td>
-          <td class="capitalize">${JENIS_PENANGANAN_LABEL[r.jenis_penanganan]||(r.jenis_penanganan||'—').replaceAll('_',' ')}</td>
-          <td class="max-w-[220px]">${r.sub_kegiatan||'—'}</td>
-          <td class="capitalize">${KATEGORI_RUANG_LABEL[r.kategori_ruang]||'—'}</td>
-          <td class="font-mono">${r.sta_awal!=null? 'Sta.'+fmtNum(r.sta_awal,3):'—'}</td>
-          <td class="font-mono">${r.sta_akhir!=null? 'Sta.'+fmtNum(r.sta_akhir,3):'—'}</td>
-          <td class="font-mono text-[12px]">${r.nilai_pci??'-'} / ${r.nilai_sdi??'-'} / ${r.nilai_ikp??'-'}</td>
-          <td>${badge(r.kondisi_hasil)}</td>
-          <td>${r.rekomendasi||'—'}</td>
-          <td class="font-mono">${fmtNum(r.volume)}</td>
-          <td>${SATUAN_LABEL[r.satuan]||'—'}</td>
-          <td class="font-mono">${fmtRp(r.biaya)}</td>
-          <td>${(r.sumber_dana||'—').replaceAll('_',' ')}</td>
-          <td>${r.kontraktor_pelaksana||'—'}</td>
-        </tr>`).join('');
-      document.getElementById('kg-empty').classList.toggle('hidden', filtered.length>0);
-    }
-    document.getElementById('kg-search').addEventListener('input', renderRows);
-    renderRows();
-    if(isEditor()) document.getElementById('btn-add-kegiatan').addEventListener('click', ()=>openKegiatanFormModal());
-  }catch(err){ v.innerHTML = errorPanel(err); }
-}
-
-async function openKegiatanFormModal(){
-  const ruasOptions = state.ruasCache.length ? state.ruasCache : await api.ruasList();
-  state.ruasCache = ruasOptions;
+function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=null){
+  const isEdit = !!editData;
   const overlay = openModal(`
     <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
-    <h3 class="font-display font-extrabold text-lg mb-1">Tambah Kegiatan Penanganan</h3>
-    <p class="text-[12px] text-ink-500 mb-4">Acuan jenis &amp; sub kegiatan: Permen PU No. 13 Tahun 2011 tentang Pedoman Pemeliharaan Jalan.</p>
-    <form id="form-kegiatan" class="space-y-4">
-      <div class="grid sm:grid-cols-2 gap-3">
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Ruas Jalan *</label>
-          <select id="kg-ruas" required><option value="">– pilih ruas –</option>${ruasOptions.map(r=>`<option value="${r.id}">${r.nama_ruas}</option>`).join('')}</select></div>
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Tanggal Penanganan *</label><input id="kg-tanggal" type="date" required></div>
+    <h3 class="font-display font-extrabold text-lg mb-1">${isEdit?'Ubah Kegiatan Penanganan':'Tambah Kegiatan Penanganan'}</h3>
+    <p class="text-[13px] text-ink-500 mb-4">Riwayat penanganan akan langsung terhubung ke master ruas jalan.</p>
+    <form id="form-kegiatan" class="space-y-3">
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Ruas Jalan *</label>
+        <select id="kg-ruas" required>${(ruasList||[]).map(r=>`<option value="${r.id}" ${(editData?.ruas_id||defaultRuas?.id)===r.id?'selected':''}>${r.kode_ruas} — ${r.nama_ruas}</option>`).join('')}</select></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Jenis Penanganan *</label>
+          <select id="kg-jenis" required>${JENIS_PENANGANAN_OPT.map(([v,l])=>`<option value="${v}" ${editData?.jenis_penanganan===v?'selected':''}>${l}</option>`).join('')}</select></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Kategori Ruang</label>
+          <select id="kg-kategori"><option value="">—</option><option value="rumija" ${editData?.kategori_ruang==='rumija'?'selected':''}>Rumija</option><option value="rumaja" ${editData?.kategori_ruang==='rumaja'?'selected':''}>Rumaja</option><option value="ruwasja" ${editData?.kategori_ruang==='ruwasja'?'selected':''}>Ruwasja</option></select></div>
       </div>
-      <div class="grid sm:grid-cols-2 gap-3">
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Jenis Kegiatan *</label>
-          <select id="kg-jenis" required><option value="">– pilih –</option>${Object.entries(JENIS_PENANGANAN_LABEL).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select></div>
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Sub Kegiatan *</label>
-          <select id="kg-sub" required disabled><option value="">– pilih jenis kegiatan terlebih dahulu –</option></select></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Sub Kegiatan</label><select id="kg-sub"><option value="">Pilih jenis penanganan dahulu…</option></select></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">STA Awal (km)</label><input id="kg-sta-awal" type="number" step="0.001" min="0" value="${editData?.sta_awal??''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">STA Akhir (km)</label><input id="kg-sta-akhir" type="number" step="0.001" min="0" value="${editData?.sta_akhir??''}"></div>
       </div>
-      <div><label class="text-[12.5px] font-semibold text-ink-600">Kategori Ruang</label>
-        <select id="kg-kategori"><option value="">– pilih –</option>${Object.entries(KATEGORI_RUANG_LABEL).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select></div>
-
-      <div>
-        <div class="font-semibold text-[13.5px] mb-1">Dokumentasi Foto Lokasi</div>
-        <p class="text-[11.5px] text-ink-400 mb-2">Unggah foto kondisi jalan di titik awal dan titik akhir segmen kegiatan.</p>
-        <div class="grid sm:grid-cols-2 gap-3">
-          <div><label class="text-[12px] font-semibold text-ink-600">Foto Titik Awal (STA Awal)</label><input id="kg-foto-awal" type="file" accept="image/*"><p class="text-[10.5px] text-ink-400 mt-1">JPG/PNG/WEBP, maks 5 MB</p></div>
-          <div><label class="text-[12px] font-semibold text-ink-600">Foto Titik Akhir (STA Akhir)</label><input id="kg-foto-akhir" type="file" accept="image/*"><p class="text-[10.5px] text-ink-400 mt-1">JPG/PNG/WEBP, maks 5 MB</p></div>
-        </div>
-        <div class="grid sm:grid-cols-2 gap-3 mt-2">
-          <div><label class="text-[12.5px] font-semibold text-ink-600">STA Awal</label><input id="kg-sta-awal" type="number" step="0.001" min="0" placeholder="mis. 0.000"></div>
-          <div><label class="text-[12.5px] font-semibold text-ink-600">STA Akhir</label><input id="kg-sta-akhir" type="number" step="0.001" min="0" placeholder="mis. 1.500"></div>
-        </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Tanggal Mulai *</label><input id="kg-tgl-mulai" type="date" required value="${editData?.tanggal_penanganan||editData?.tanggal_mulai||''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Tanggal Selesai</label><input id="kg-tgl-selesai" type="date" value="${editData?.tanggal_selesai||''}"></div>
       </div>
-
-      <div>
-        <div class="font-semibold text-[13.5px] mb-1">Skala Kerusakan &amp; Kondisi</div>
-        <p class="text-[11.5px] text-ink-400 mb-2">PCI &amp; IKP: 0–100 (semakin tinggi semakin baik). SDI: semakin rendah semakin baik. Isi salah satu nilai PCI/SDI/IKP untuk melihat estimasi kondisi &amp; rekomendasi penanganan.</p>
-        <div class="grid grid-cols-3 gap-3">
-          <div><label class="text-[12px] font-semibold text-ink-600">PCI</label><input id="kg-pci" type="number" min="0" max="100" step="0.1"></div>
-          <div><label class="text-[12px] font-semibold text-ink-600">SDI</label><input id="kg-sdi" type="number" min="0" step="0.1"></div>
-          <div><label class="text-[12px] font-semibold text-ink-600">IKP</label><input id="kg-ikp" type="number" min="0" max="100" step="0.1"></div>
-        </div>
-        <div id="kg-estimasi" class="text-[12.5px] mt-2 text-ink-500"></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Status Pekerjaan *</label>
+          <select id="kg-status" required>${STATUS_PEKERJAAN_OPT.map(([v,l])=>`<option value="${v}" ${(editData?.status_pekerjaan||'perencanaan')===v?'selected':''}>${l}</option>`).join('')}</select></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Sumber Dana</label>
+          <select id="kg-sumber"><option value="">—</option>${SUMBER_DANA_OPT.map(([v,l])=>`<option value="${v}" ${editData?.sumber_dana===v?'selected':''}>${l}</option>`).join('')}</select></div>
       </div>
-
-      <div class="grid sm:grid-cols-2 gap-3">
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Volume</label><input id="kg-volume" type="number" step="0.01" min="0"></div>
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Satuan</label><select id="kg-satuan"><option value="">– pilih –</option>${Object.entries(SATUAN_LABEL).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select></div>
+      <div class="grid grid-cols-3 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Nilai PCI</label><input id="kg-pci" type="number" step="0.01" value="${editData?.nilai_pci??''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Nilai SDI</label><input id="kg-sdi" type="number" step="0.01" value="${editData?.nilai_sdi??''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Nilai IKP</label><input id="kg-ikp" type="number" step="0.01" value="${editData?.nilai_ikp??''}"></div>
       </div>
-      <div class="grid sm:grid-cols-2 gap-3">
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Biaya (Rp)</label><input id="kg-biaya" type="number" step="1" min="0"></div>
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Sumber Dana</label><select id="kg-sumber"><option value="">– pilih –</option><option value="APBD_Provinsi">APBD Provinsi</option><option value="APBN">APBN</option><option value="DAK">DAK</option><option value="Hibah">Hibah</option><option value="Lainnya">Lainnya</option></select></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Kondisi Hasil Penanganan</label>
+        <select id="kg-kondisi-hasil"><option value="">—</option>${KONDISI_ORDER.map(k=>`<option value="${k}" ${editData?.kondisi_hasil===k?'selected':''}>${KONDISI_LABEL[k]}</option>`).join('')}</select></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Rekomendasi</label><textarea id="kg-rekomendasi" rows="2">${editData?.rekomendasi||''}</textarea></div>
+      <div class="grid grid-cols-3 gap-3">
+        <div class="col-span-2"><label class="text-[12.5px] font-semibold text-ink-600">Volume</label><input id="kg-volume" type="number" step="0.01" min="0" value="${editData?.volume??''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Satuan</label><select id="kg-satuan"><option value="">—</option>${SATUAN_OPT.map(s=>`<option value="${s}" ${editData?.satuan===s?'selected':''}>${s}</option>`).join('')}</select></div>
       </div>
-      <div><label class="text-[12.5px] font-semibold text-ink-600">Kontraktor / Pelaksana</label><input id="kg-kontraktor" placeholder="mis. Swakelola Bidang Bina Marga / CV..."></div>
-      <div><label class="text-[12.5px] font-semibold text-ink-600">Link Dokumentasi (opsional)</label><input id="kg-link" placeholder="https://drive.google.com/..."></div>
-      <div><label class="text-[12.5px] font-semibold text-ink-600">Keterangan</label><textarea id="kg-keterangan" rows="2"></textarea></div>
-
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Biaya (Rp)</label><input id="kg-biaya" type="number" step="1" min="0" value="${editData?.biaya??''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Kontraktor / Pelaksana</label><input id="kg-kontraktor" value="${editData?.kontraktor_pelaksana||''}"></div>
+      </div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Link Dokumentasi</label><input id="kg-link" type="url" placeholder="https://…" value="${editData?.link_dokumentasi||''}"></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Deskripsi</label><textarea id="kg-deskripsi" rows="2">${editData?.keterangan||editData?.deskripsi||''}</textarea></div>
       <div id="kg-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
-      <div class="flex justify-end gap-2 pt-1">
-        <button type="button" data-close class="btn-ghost">Batal</button>
-        <button type="submit" class="btn-primary">Simpan</button>
-      </div>
-    </form>`, 'max-w-2xl');
+      <button type="submit" class="btn-primary w-full">${isEdit?'Simpan Perubahan':'Simpan Kegiatan Penanganan'}</button>
+    </form>`);
+  overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
 
-  overlay.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click', ()=>overlay.remove()));
-
-  const jenisSel = overlay.querySelector('#kg-jenis');
-  const subSel = overlay.querySelector('#kg-sub');
-  jenisSel.addEventListener('change', async ()=>{
-    if(!jenisSel.value){ subSel.innerHTML = `<option value="">– pilih jenis kegiatan terlebih dahulu –</option>`; subSel.disabled = true; return; }
-    subSel.innerHTML = `<option value="">Memuat…</option>`; subSel.disabled = true;
+  async function loadSubKegiatan(jenis, selected){
+    const sel = overlay.querySelector('#kg-sub');
+    sel.innerHTML = `<option value="">Memuat…</option>`;
     try{
-      const subs = await api.subKegiatanRef(jenisSel.value);
-      subSel.innerHTML = subs.length? `<option value="">– pilih –</option>${subs.map(s=>`<option value="${s.nama_sub_kegiatan.replace(/"/g,'&quot;')}">${s.nama_sub_kegiatan}</option>`).join('')}` : `<option value="">Belum ada referensi sub kegiatan</option>`;
-      subSel.disabled = false;
-    }catch(e){ subSel.innerHTML = `<option value="">Gagal memuat sub kegiatan</option>`; }
-  });
-
-  const estBox = overlay.querySelector('#kg-estimasi');
-  ['#kg-pci','#kg-sdi','#kg-ikp'].forEach(sel=>overlay.querySelector(sel).addEventListener('input', ()=>{
-    const pci = overlay.querySelector('#kg-pci').value, sdi = overlay.querySelector('#kg-sdi').value, ikp = overlay.querySelector('#kg-ikp').value;
-    const est = estimasiKondisi(pci,sdi,ikp);
-    estBox.innerHTML = est? `Estimasi kondisi: ${badge(est.kondisi)} <span class="ml-1">→ Rekomendasi: <b>${est.rekomendasi}</b></span>` : '';
-  }));
+      const list = await api.subKegiatanRef(jenis);
+      sel.innerHTML = `<option value="">— Pilih sub kegiatan —</option>` +
+        list.map(s=>`<option value="${s.nama_sub_kegiatan}" ${selected===s.nama_sub_kegiatan?'selected':''}>${s.nama_sub_kegiatan}</option>`).join('') +
+        `<option value="__custom__">Lainnya (isi manual)</option>`;
+      if(selected && !list.find(s=>s.nama_sub_kegiatan===selected)){
+        sel.innerHTML += `<option value="${selected}" selected>${selected}</option>`;
+      }
+    }catch(e){ sel.innerHTML = `<option value="">Gagal memuat sub kegiatan</option>`; }
+  }
+  overlay.querySelector('#kg-jenis').addEventListener('change', (e)=>loadSubKegiatan(e.target.value, null));
+  loadSubKegiatan(overlay.querySelector('#kg-jenis').value, editData?.sub_kegiatan);
 
   overlay.querySelector('#form-kegiatan').addEventListener('submit', async (e)=>{
     e.preventDefault();
     const errBox = overlay.querySelector('#kg-err');
-    const submitBtn = overlay.querySelector('button[type=submit]');
-    submitBtn.disabled = true; submitBtn.textContent = 'Menyimpan…';
+    let subKegiatan = overlay.querySelector('#kg-sub').value;
+    if(subKegiatan === '__custom__'){ subKegiatan = prompt('Tulis nama sub kegiatan:') || ''; }
+    const tglMulai = overlay.querySelector('#kg-tgl-mulai').value;
+    const payload = {
+      ruas_id: overlay.querySelector('#kg-ruas').value,
+      jenis_penanganan: overlay.querySelector('#kg-jenis').value,
+      kategori_ruang: overlay.querySelector('#kg-kategori').value || null,
+      sub_kegiatan: subKegiatan || null,
+      sta_awal: overlay.querySelector('#kg-sta-awal').value || null,
+      sta_akhir: overlay.querySelector('#kg-sta-akhir').value || null,
+      tanggal_mulai: tglMulai || null,
+      tanggal_selesai: overlay.querySelector('#kg-tgl-selesai').value || null,
+      tahun_anggaran: tglMulai ? new Date(tglMulai).getFullYear() : new Date().getFullYear(),
+      status_pekerjaan: overlay.querySelector('#kg-status').value,
+      sumber_dana: overlay.querySelector('#kg-sumber').value || null,
+      nilai_pci: overlay.querySelector('#kg-pci').value || null,
+      nilai_sdi: overlay.querySelector('#kg-sdi').value || null,
+      nilai_ikp: overlay.querySelector('#kg-ikp').value || null,
+      kondisi_hasil: overlay.querySelector('#kg-kondisi-hasil').value || null,
+      rekomendasi: overlay.querySelector('#kg-rekomendasi').value || null,
+      volume: overlay.querySelector('#kg-volume').value || null,
+      satuan: overlay.querySelector('#kg-satuan').value || null,
+      biaya: overlay.querySelector('#kg-biaya').value || null,
+      kontraktor_pelaksana: overlay.querySelector('#kg-kontraktor').value || null,
+      link_dokumentasi: overlay.querySelector('#kg-link').value || null,
+      deskripsi: overlay.querySelector('#kg-deskripsi').value || null,
+    };
+    if(isEdit){ payload.segmen_id = editData?.segmen_id ?? null; }
     try{
-      const pci = overlay.querySelector('#kg-pci').value, sdi = overlay.querySelector('#kg-sdi').value, ikp = overlay.querySelector('#kg-ikp').value;
-      const est = estimasiKondisi(pci,sdi,ikp);
-      let fotoAwalPath = null, fotoAkhirPath = null;
-      const fAwal = overlay.querySelector('#kg-foto-awal').files[0];
-      const fAkhir = overlay.querySelector('#kg-foto-akhir').files[0];
-      if(fAwal) fotoAwalPath = await api.uploadFoto(fAwal, 'foto-lokasi');
-      if(fAkhir) fotoAkhirPath = await api.uploadFoto(fAkhir, 'foto-lokasi');
-
-      const tanggal = overlay.querySelector('#kg-tanggal').value;
-      await api.insertKegiatan({
-        ruas_id: overlay.querySelector('#kg-ruas').value,
-        tanggal_mulai: tanggal,
-        tahun_anggaran: tanggal ? new Date(tanggal).getFullYear() : new Date().getFullYear(),
-        jenis_penanganan: overlay.querySelector('#kg-jenis').value,
-        sub_kegiatan: overlay.querySelector('#kg-sub').value || null,
-        kategori_ruang: overlay.querySelector('#kg-kategori').value || null,
-        sta_awal: overlay.querySelector('#kg-sta-awal').value || null,
-        sta_akhir: overlay.querySelector('#kg-sta-akhir').value || null,
-        nilai_pci: pci || null, nilai_sdi: sdi || null, nilai_ikp: ikp || null,
-        kondisi_hasil: est ? est.kondisi : null, rekomendasi: est ? est.rekomendasi : null,
-        volume: overlay.querySelector('#kg-volume').value || null,
-        satuan: overlay.querySelector('#kg-satuan').value || null,
-        biaya: overlay.querySelector('#kg-biaya').value || null,
-        sumber_dana: overlay.querySelector('#kg-sumber').value || null,
-        kontraktor_pelaksana: overlay.querySelector('#kg-kontraktor').value || null,
-        link_dokumentasi: overlay.querySelector('#kg-link').value || null,
-        deskripsi: overlay.querySelector('#kg-keterangan').value || null,
-        foto_awal_path: fotoAwalPath, foto_akhir_path: fotoAkhirPath,
-        status_pekerjaan: 'selesai',
-        created_by: state.user.id,
-      });
+      if(isEdit){ await api.updatePenanganan(editData.id, payload); }
+      else{ payload.created_by = state.user.id; await api.insertPenanganan(payload); }
       overlay.remove();
-      viewKegiatan();
-    }catch(err){
-      errBox.textContent = err.message; errBox.classList.remove('hidden');
-      submitBtn.disabled = false; submitBtn.textContent = 'Simpan';
-    }
+      if(onSaved) onSaved(); else viewKegiatan();
+    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
   });
 }
 
-// --- 11c. VIEW: DOKUMEN ----------------------------------------------------
-async function viewDokumen(){
+function openKegiatanDetailModal(kg){
+  const overlay = openModal(`
+    <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
+    <h3 class="font-display font-extrabold text-lg mb-1 capitalize">${(kg.jenis_penanganan||'—').replaceAll('_',' ')}</h3>
+    <p class="text-[13px] text-ink-500 mb-4">${kg.kode_ruas} · ${kg.nama_ruas} · ${fmtDate(kg.tanggal_penanganan)}</p>
+    <div class="grid grid-cols-2 gap-3 text-[13px] mb-4">
+      <div><span class="text-ink-400">Sub Kegiatan</span><div class="font-medium">${kg.sub_kegiatan||'—'}</div></div>
+      <div><span class="text-ink-400">STA</span><div class="font-medium font-mono">${fmtNum(kg.sta_awal,3)}–${fmtNum(kg.sta_akhir,3)}</div></div>
+      <div><span class="text-ink-400">Sumber Dana</span><div class="font-medium">${(kg.sumber_dana||'—').replaceAll('_',' ')}</div></div>
+      <div><span class="text-ink-400">Biaya</span><div class="font-medium font-mono">${fmtRp(kg.biaya)}</div></div>
+      <div><span class="text-ink-400">Volume</span><div class="font-medium">${kg.volume?fmtNum(kg.volume,2)+' '+(kg.satuan||''):'—'}</div></div>
+      <div><span class="text-ink-400">Pelaksana</span><div class="font-medium">${kg.kontraktor_pelaksana||'—'}</div></div>
+      <div><span class="text-ink-400">PCI / SDI / IKP</span><div class="font-medium font-mono">${kg.nilai_pci??'—'} / ${kg.nilai_sdi??'—'} / ${kg.nilai_ikp??'—'}</div></div>
+      <div><span class="text-ink-400">Kondisi Hasil</span><div>${badge(kg.kondisi_hasil)}</div></div>
+    </div>
+    ${kg.rekomendasi?`<div class="mb-3 text-[13px]"><span class="text-ink-400">Rekomendasi</span><p class="text-ink-600 mt-0.5">${kg.rekomendasi}</p></div>`:''}
+    ${kg.keterangan?`<div class="mb-4 text-[13px]"><span class="text-ink-400">Deskripsi</span><p class="text-ink-600 mt-0.5">${kg.keterangan}</p></div>`:''}
+    <h4 class="font-display font-bold text-[14px] mb-2">Kelengkapan Dokumen</h4>
+    <div id="dok-matrix" class="text-[13px]"><div class="skel h-32 w-full"></div></div>
+  `);
+  overlay.querySelector('div.card').classList.add('!max-w-2xl');
+  overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+
+  api.dokumenMatrix(kg.id).then(rows=>{
+    const box = overlay.querySelector('#dok-matrix');
+    if(!rows.length){ box.innerHTML = `<p class="text-ink-400">Belum ada daftar dokumen (kemungkinan trigger otomatis belum berjalan).</p>`; return; }
+    const byTahap = {};
+    rows.forEach(r=>{ (byTahap[r.tahap_nama] ??= []).push(r); });
+    box.innerHTML = Object.entries(byTahap).map(([tahap, docs])=>`
+      <div class="mb-3">
+        <div class="font-semibold text-ink-700 mb-1.5">${tahap}</div>
+        ${docs.map(d=>`
+          <div class="flex items-center gap-2 py-1.5 border-b border-line last:border-0" data-dokid="${d.dokumen_id}">
+            <button data-toggle class="w-5 h-5 rounded border ${d.status==='sudah'?'bg-[var(--good)] border-[var(--good)] text-white':'border-line'} flex items-center justify-center shrink-0" ${isEditor()?'':'disabled'}>${d.status==='sudah'?icon('check','w-3.5 h-3.5'):''}</button>
+            <span class="flex-1 ${d.status==='sudah'?'':'text-ink-500'}">${d.nama_dokumen}${d.wajib?'':' <span class=\"text-ink-400\">(opsional)</span>'}</span>
+            ${isEditor()?`<input data-link placeholder="Link dokumen" value="${d.link_dokumen||''}" class="!w-40 !py-1 text-[12px]">`:(d.link_dokumen?`<a href="${d.link_dokumen}" target="_blank" class="text-navy-700 text-[12px] underline">Buka</a>`:'')}
+          </div>`).join('')}
+      </div>`).join('');
+    if(isEditor()){
+      box.querySelectorAll('[data-dokid]').forEach(row=>{
+        const dokId = row.dataset.dokid;
+        const rowData = rows.find(r=>r.dokumen_id===dokId);
+        row.querySelector('[data-toggle]').addEventListener('click', async (e)=>{
+          const newStatus = rowData.status==='sudah' ? 'belum' : 'sudah';
+          try{
+            await api.updateDokumen(dokId, {status:newStatus, tanggal_update:new Date().toISOString(), uploaded_by:state.user.id});
+            rowData.status = newStatus;
+            e.currentTarget.className = `w-5 h-5 rounded border ${newStatus==='sudah'?'bg-[var(--good)] border-[var(--good)] text-white':'border-line'} flex items-center justify-center shrink-0`;
+            e.currentTarget.innerHTML = newStatus==='sudah'?icon('check','w-3.5 h-3.5'):'';
+          }catch(err){ alert('Gagal memperbarui status dokumen: '+err.message); }
+        });
+        row.querySelector('[data-link]').addEventListener('change', async (e)=>{
+          try{ await api.updateDokumen(dokId, {link_dokumen: e.target.value || null, tanggal_update:new Date().toISOString(), uploaded_by:state.user.id}); }
+          catch(err){ alert('Gagal menyimpan link: '+err.message); }
+        });
+      });
+    }
+  }).catch(err=>{ overlay.querySelector('#dok-matrix').innerHTML = errorPanel(err); });
+}
+
+// --- 11c. MODAL: ANGGARAN TAHUNAN -------------------------------------
+function openAnggaranFormModal(ruas, editData=null, onSaved=null){
+  const isEdit = !!editData;
+  const overlay = openModal(`
+    <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
+    <h3 class="font-display font-extrabold text-lg mb-1">${isEdit?'Ubah Anggaran':'Tambah Anggaran Tahunan'}</h3>
+    <p class="text-[13px] text-ink-500 mb-4">${ruas.kode_ruas} · ${ruas.nama_ruas}</p>
+    <form id="form-anggaran" class="space-y-3">
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Tahun *</label><input id="ag-tahun" type="number" required min="2000" max="2100" value="${editData?.tahun||new Date().getFullYear()}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Sumber Dana</label><select id="ag-sumber"><option value="">—</option>${SUMBER_DANA_OPT.map(([v,l])=>`<option value="${v}" ${editData?.sumber_dana===v?'selected':''}>${l}</option>`).join('')}</select></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Pagu (Rp)</label><input id="ag-pagu" type="number" step="1" min="0" value="${editData?.pagu??0}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Realisasi (Rp)</label><input id="ag-realisasi" type="number" step="1" min="0" value="${editData?.realisasi??0}"></div>
+      </div>
+      <div id="ag-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
+      <button type="submit" class="btn-primary w-full">${isEdit?'Simpan Perubahan':'Simpan Anggaran'}</button>
+    </form>`);
+  overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+  overlay.querySelector('#form-anggaran').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const errBox = overlay.querySelector('#ag-err');
+    const payload = {
+      ruas_id: ruas.id,
+      tahun: overlay.querySelector('#ag-tahun').value,
+      sumber_dana: overlay.querySelector('#ag-sumber').value || null,
+      pagu: overlay.querySelector('#ag-pagu').value || 0,
+      realisasi: overlay.querySelector('#ag-realisasi').value || 0,
+    };
+    try{
+      if(isEdit){ await api.updateAnggaran(editData.id, payload); }
+      else{ await api.insertAnggaran(payload); }
+      overlay.remove();
+      if(onSaved) onSaved(); else viewRuasDetail(ruas.id);
+    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
+  });
+}
+
+// --- 11d. MODAL: KEJADIAN BENCANA --------------------------------------
+function openBencanaFormModal(ruasList, editData=null, onSaved=null){
+  const isEdit = !!editData;
+  const overlay = openModal(`
+    <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
+    <h3 class="font-display font-extrabold text-lg mb-4">${isEdit?'Ubah Kejadian Bencana':'Tambah Kejadian Bencana'}</h3>
+    <form id="form-bencana" class="space-y-3">
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Ruas Jalan *</label>
+        <select id="bc-ruas" required><option value="">Pilih ruas…</option>${(ruasList||[]).map(r=>`<option value="${r.id}">${r.kode_ruas} — ${r.nama_ruas}</option>`).join('')}</select></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Segmen *</label><select id="bc-segmen" required><option value="">Pilih ruas terlebih dahulu…</option></select></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Jenis Kejadian *</label>
+          <select id="bc-jenis" required>
+            <option value="longsor" ${editData?.jenis_kejadian==='longsor'?'selected':''}>Longsor</option>
+            <option value="banjir" ${editData?.jenis_kejadian==='banjir'?'selected':''}>Banjir</option>
+            <option value="abrasi" ${editData?.jenis_kejadian==='abrasi'?'selected':''}>Abrasi</option>
+            <option value="gempa" ${editData?.jenis_kejadian==='gempa'?'selected':''}>Gempa</option>
+            <option value="angin_kencang" ${editData?.jenis_kejadian==='angin_kencang'?'selected':''}>Angin Kencang</option>
+            <option value="lainnya" ${editData?.jenis_kejadian==='lainnya'?'selected':''}>Lainnya</option>
+          </select></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Tanggal Kejadian *</label><input id="bc-tanggal" type="date" required value="${editData?.tanggal_kejadian||''}"></div>
+      </div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Tingkat Kerusakan</label>
+        <select id="bc-tingkat">
+          <option value="">—</option>
+          <option value="ringan" ${editData?.tingkat_kerusakan==='ringan'?'selected':''}>Ringan</option>
+          <option value="sedang" ${editData?.tingkat_kerusakan==='sedang'?'selected':''}>Sedang</option>
+          <option value="berat" ${editData?.tingkat_kerusakan==='berat'?'selected':''}>Berat</option>
+          <option value="putus_total" ${editData?.tingkat_kerusakan==='putus_total'?'selected':''}>Putus Total</option>
+        </select></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Deskripsi</label><textarea id="bc-deskripsi" rows="3">${editData?.deskripsi||''}</textarea></div>
+      <div id="bc-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
+      <button type="submit" class="btn-primary w-full">${isEdit?'Simpan Perubahan':'Simpan Kejadian Bencana'}</button>
+    </form>`);
+  overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+
+  async function loadSegmenOptions(ruasId, selectedSegId){
+    const sel = overlay.querySelector('#bc-segmen');
+    if(!ruasId){ sel.innerHTML = `<option value="">Pilih ruas terlebih dahulu…</option>`; return; }
+    sel.innerHTML = `<option value="">Memuat…</option>`;
+    try{
+      const segs = await api.segmenByRuas(ruasId);
+      sel.innerHTML = segs.length? segs.map(s=>`<option value="${s.id}" ${selectedSegId===s.id?'selected':''}>${s.kode_segmen||'Segmen'} (STA ${fmtNum(s.sta_awal,3)}–${fmtNum(s.sta_akhir,3)})</option>`).join('') : `<option value="">Ruas ini belum punya segmen</option>`;
+    }catch(e){ sel.innerHTML = `<option value="">Gagal memuat segmen</option>`; }
+  }
+  overlay.querySelector('#bc-ruas').addEventListener('change', (e)=>loadSegmenOptions(e.target.value, null));
+  if(editData){
+    const ruasId = editData.segmen_jalan?.ruas_jalan? (ruasList.find(r=>r.kode_ruas===editData.segmen_jalan.ruas_jalan.kode_ruas)?.id) : null;
+    if(ruasId){ overlay.querySelector('#bc-ruas').value = ruasId; loadSegmenOptions(ruasId, editData.segmen_id); }
+  }
+
+  overlay.querySelector('#form-bencana').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const errBox = overlay.querySelector('#bc-err');
+    const payload = {
+      segmen_id: overlay.querySelector('#bc-segmen').value,
+      jenis_kejadian: overlay.querySelector('#bc-jenis').value,
+      tanggal_kejadian: overlay.querySelector('#bc-tanggal').value,
+      tingkat_kerusakan: overlay.querySelector('#bc-tingkat').value || null,
+      deskripsi: overlay.querySelector('#bc-deskripsi').value || null,
+    };
+    if(!payload.segmen_id){ errBox.textContent = 'Pilih ruas dan segmen terlebih dahulu.'; errBox.classList.remove('hidden'); return; }
+    try{
+      if(isEdit){ await api.updateBencana(editData.id, payload); }
+      else{ payload.created_by = state.user.id; await api.insertBencana(payload); }
+      overlay.remove();
+      if(onSaved) onSaved(); else viewBencana();
+    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
+  });
+}
+
+// --- 11e. VIEW: KEGIATAN PENANGANAN (menu baru) ----------------------------
+async function viewKegiatan(){
   const v = document.getElementById('view');
   v.innerHTML = `<div class="skel h-10 w-full mb-4"></div><div class="skel h-96 w-full"></div>`;
   try{
-    const matrix = await api.dokumenMatrix();
-    const groups = {};
-    matrix.forEach(row=>{
-      if(!groups[row.penanganan_id]) groups[row.penanganan_id] = {
-        penanganan_id: row.penanganan_id, ruas: row.nama_ruas, kode_ruas: row.kode_ruas,
-        tanggal: row.tanggal_penanganan, jenis: row.jenis_penanganan, sub: row.sub_kegiatan, items: []
-      };
-      groups[row.penanganan_id].items.push(row);
-    });
-    const list = Object.values(groups).sort((a,b)=> new Date(b.tanggal||0) - new Date(a.tanggal||0));
-
+    const [kegiatan, ruas] = await Promise.all([api.kegiatanList(), api.ruasList()]);
+    state.ruasCache = ruas;
     v.innerHTML = `
-    <div class="mb-2"><h1 class="font-display font-extrabold text-2xl text-ink-900">Dokumen</h1>
-    <p class="text-ink-500 text-[13.5px]">Dokumen terkait pekerjaan/serah terima. Matriks kelengkapan dokumen per ruas jalan &amp; per tahap. Klik <b>+ Tambah</b> pada dokumen yang diinginkan.</p></div>
-    <div class="grid lg:grid-cols-[280px_1fr] gap-5 mt-4">
-      <div class="card p-0 overflow-hidden">
-        <div class="px-4 py-3 border-b border-line font-display font-bold text-[13px] bg-[#F8FAFD]">Ruas Jalan &amp; Kegiatan Penanganan</div>
-        <div id="dok-sidebar" class="max-h-[70vh] overflow-y-auto"></div>
-      </div>
-      <div id="dok-detail" class="card p-5">
-        <div class="text-ink-400 text-[13.5px] text-center py-16">${list.length? 'Pilih ruas &amp; kegiatan di sebelah kiri.' : 'Belum ada kegiatan penanganan. Tambahkan lewat menu Kegiatan Penanganan.'}</div>
-      </div>
-    </div>`;
+    <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+      <div><h1 class="font-display font-extrabold text-2xl text-ink-900">Kegiatan Penanganan</h1>
+      <p class="text-ink-500 text-[13.5px]">${kegiatan.length} kegiatan tercatat, terhubung langsung ke master ruas jalan</p></div>
+      ${isEditor()?`<button id="btn-add-kegiatan" class="btn-accent">+ Tambah Kegiatan Penanganan</button>`:''}
+    </div>
+    <div class="flex flex-wrap gap-3 mb-4">
+      <input id="fk-search" placeholder="Cari ruas / sub kegiatan…" class="max-w-xs">
+      <select id="fk-jenis" class="max-w-[200px]"><option value="">Semua Jenis</option>${JENIS_PENANGANAN_OPT.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
+      <select id="fk-status" class="max-w-[180px]"><option value="">Semua Status</option>${STATUS_PEKERJAAN_OPT.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
+    </div>
+    <div class="card overflow-x-auto">
+      <table><thead><tr><th>Ruas</th><th>Jenis</th><th>Sub Kegiatan</th><th>Tanggal</th><th>Biaya</th><th>Status</th>${isEditor()?'<th>Aksi</th>':''}</tr></thead>
+      <tbody id="kegiatan-tbody"></tbody></table>
+    </div>
+    <div id="kegiatan-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Belum ada kegiatan penanganan yang tercatat.</div>`;
 
-    const sidebar = document.getElementById('dok-sidebar');
-    sidebar.innerHTML = list.map((g,i)=>{
-      const total = g.items.length, done = g.items.filter(it=>it.status==='sudah').length;
-      return `<button data-idx="${i}" class="dok-item w-full text-left px-4 py-3 border-b border-line hover:bg-[#F8FAFD] block">
-        <div class="flex items-center justify-between"><span class="text-[11.5px] text-ink-400">${fmtDate(g.tanggal)}</span><span class="font-mono text-[10.5px] text-ink-400">${done}/${total}</span></div>
-        <div class="font-semibold text-[13px]">${g.ruas}</div>
-        <div class="text-[12px] text-ink-500 capitalize">${JENIS_PENANGANAN_LABEL[g.jenis]||(g.jenis||'').replaceAll('_',' ')}${g.sub? ' · '+g.sub : ''}</div>
-      </button>`;
-    }).join('');
-
-    function renderDetail(idx){
-      const g = list[idx];
-      sidebar.querySelectorAll('.dok-item').forEach(b=>b.classList.toggle('bg-[#EEF3FA]', Number(b.dataset.idx)===idx));
-      const byTahap = {};
-      g.items.forEach(it=>{ (byTahap[it.tahap_urutan] ||= {nama:it.tahap_nama, items:[]}).items.push(it); });
-      const tahapKeys = Object.keys(byTahap).sort((a,b)=>a-b);
-      const detail = document.getElementById('dok-detail');
-      detail.innerHTML = `
-        <div class="mb-4 flex items-start justify-between flex-wrap gap-2">
-          <div>
-            <div class="text-[11.5px] text-ink-400">${fmtDate(g.tanggal)}</div>
-            <div class="font-display font-bold text-[16px]">${g.ruas}</div>
-            <div class="text-[13px] text-ink-500 capitalize">${JENIS_PENANGANAN_LABEL[g.jenis]||(g.jenis||'').replaceAll('_',' ')}${g.sub? ' · '+g.sub : ''}</div>
-          </div>
-        </div>
-        <div class="flex gap-3 overflow-x-auto pb-2">
-        ${tahapKeys.map(tk=>`
-          <div class="border border-line rounded-lg p-3 shrink-0" style="width:230px">
-            <div class="font-display font-bold text-[12px] text-navy-700 mb-2 uppercase">Tahap ${tk}<div class="font-normal normal-case text-ink-500 text-[11px]">${byTahap[tk].nama}</div></div>
-            <div class="space-y-2.5">
-            ${byTahap[tk].items.map(it=>`
-              <div class="text-[12px]">
-                <div class="flex items-start gap-1.5">
-                  ${it.status==='sudah'? `<span class="text-[var(--good)] shrink-0">✓</span>` : `<span class="text-ink-300 shrink-0">○</span>`}
-                  <span class="${it.status==='sudah'?'text-ink-700':'text-ink-500'}">${it.nama_dokumen}</span>
-                </div>
-                ${it.status==='sudah'
-                  ? `<div class="flex items-center gap-2 mt-0.5 ml-5"><a href="${it.link_dokumen}" target="_blank" rel="noopener" class="text-navy-600 text-[11px] underline truncate max-w-[110px]">Lihat</a><button data-dok="${it.dokumen_id}" class="dok-edit text-[11px] text-ink-400 hover:text-navy-700">Ubah</button></div>`
-                  : `<button data-dok="${it.dokumen_id}" class="dok-add text-[11px] text-navy-700 font-semibold ml-5 mt-0.5">+ Tambah</button>`}
-              </div>`).join('')}
-            </div>
-          </div>`).join('')}
-        </div>`;
-      detail.querySelectorAll('.dok-add, .dok-edit').forEach(btn=>btn.addEventListener('click', ()=>{
-        const item = g.items.find(x=>x.dokumen_id===btn.dataset.dok);
-        openDokumenLinkModal(g, item, ()=>viewDokumen());
-      }));
+    function renderRows(){
+      const q = document.getElementById('fk-search').value.toLowerCase();
+      const jenis = document.getElementById('fk-jenis').value;
+      const status = document.getElementById('fk-status').value;
+      const rows = kegiatan.filter(k=>{
+        if(q && !((k.nama_ruas||'').toLowerCase().includes(q) || (k.kode_ruas||'').toLowerCase().includes(q) || (k.sub_kegiatan||'').toLowerCase().includes(q))) return false;
+        if(jenis && k.jenis_penanganan!==jenis) return false;
+        if(status && k.status_pekerjaan!==status) return false;
+        return true;
+      });
+      const tbody = document.getElementById('kegiatan-tbody');
+      tbody.innerHTML = rows.map(k=>`
+        <tr class="row-hover" data-id="${k.id}">
+          <td><span class="font-mono text-[12px] text-navy-700 font-semibold">${k.kode_ruas}</span><div class="text-[12.5px]">${k.nama_ruas}</div></td>
+          <td class="capitalize">${(k.jenis_penanganan||'—').replaceAll('_',' ')}</td>
+          <td class="text-ink-500 text-[12.5px] max-w-[220px] truncate">${k.sub_kegiatan||'—'}</td>
+          <td class="font-mono text-[12.5px]">${fmtDate(k.tanggal_penanganan)}</td>
+          <td class="font-mono text-[12.5px]">${fmtRp(k.biaya)}</td>
+          <td><span class="badge ${k.status_pekerjaan==='selesai'?'badge-baik':k.status_pekerjaan==='terhenti'?'badge-rusak_berat':'badge-sedang'} capitalize">${(k.status_pekerjaan||'—').replaceAll('_',' ')}</span></td>
+          ${isEditor()?`<td>${actionBtns({onDetail:true, onEdit:true, onDelete:isAdmin()})}</td>`:''}
+        </tr>`).join('');
+      document.getElementById('kegiatan-empty').classList.toggle('hidden', rows.length>0);
+      tbody.querySelectorAll('tr').forEach(tr=>{
+        const kg = kegiatan.find(k=>k.id===tr.dataset.id);
+        tr.addEventListener('click', ()=>openKegiatanDetailModal(kg));
+        tr.querySelector('[data-act="detail"]')?.addEventListener('click', ()=>openKegiatanDetailModal(kg));
+        tr.querySelector('[data-act="edit"]')?.addEventListener('click', async ()=>{
+          try{ const full = await api.penangananById(kg.id); openKegiatanFormModal(ruas, {id:kg.ruas_id}, {...kg, ...full}, ()=>viewKegiatan()); }
+          catch(err){ alert('Gagal memuat data kegiatan: '+err.message); }
+        });
+        tr.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
+          if(!(await confirmDelete('Hapus kegiatan penanganan ini beserta kelengkapan dokumennya?'))) return;
+          try{ await api.deletePenanganan(kg.id); viewKegiatan(); }catch(err){ alert('Gagal menghapus: '+err.message); }
+        });
+      });
     }
-    sidebar.querySelectorAll('.dok-item').forEach(b=>b.addEventListener('click', ()=>renderDetail(Number(b.dataset.idx))));
-    if(list.length) renderDetail(0);
+    ['fk-search','fk-jenis','fk-status'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    renderRows();
+    if(isEditor()){ document.getElementById('btn-add-kegiatan').addEventListener('click', ()=>openKegiatanFormModal(ruas, null, null, ()=>viewKegiatan())); }
   }catch(err){ v.innerHTML = errorPanel(err); }
 }
 
-function openDokumenLinkModal(group, item, onDone){
-  const overlay = openModal(`
-    <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
-    <h3 class="font-display font-extrabold text-lg mb-1">Sematkan Link Dokumen</h3>
-    <p class="text-[12px] text-ink-500 mb-4">Tempelkan link Google Drive / URL untuk dokumen berikut.</p>
-    <div class="text-[12.5px] bg-[#F8FAFD] border border-line rounded-lg p-3 mb-4 space-y-0.5">
-      <div><span class="text-ink-400">Ruas:</span> <b>${group.ruas}</b></div>
-      <div><span class="text-ink-400">Tahap ${item.tahap_urutan}:</span> ${item.tahap_nama}</div>
-      <div><span class="text-ink-400">Kegiatan:</span> <span class="capitalize">${JENIS_PENANGANAN_LABEL[group.jenis]||(group.jenis||'').replaceAll('_',' ')}</span>${group.sub? ' · '+group.sub:''}</div>
-      <div><span class="text-ink-400">Dokumen:</span> <b>${item.nama_dokumen}</b></div>
+// --- 11f. VIEW: DOKUMEN (matriks kelengkapan per tahap) -------------------
+async function viewDokumen(){
+  const v = document.getElementById('view');
+  v.innerHTML = `<div class="skel h-96 w-full"></div>`;
+  try{
+    const kegiatan = await api.kegiatanList();
+    if(!state.selectedDokKegiatanId || !kegiatan.some(k=>k.id===state.selectedDokKegiatanId)){
+      state.selectedDokKegiatanId = kegiatan.length? kegiatan[0].id : null;
+    }
+    v.innerHTML = `
+    <div class="mb-5"><h1 class="font-display font-extrabold text-2xl text-ink-900">Dokumen</h1>
+    <p class="text-ink-500 text-[13.5px]">Dokumen terkait pekerjaan/serah terima. Matriks kelengkapan dokumen per ruas jalan &amp; per tahap. Klik + Tambah pada dokumen yang diinginkan.</p></div>
+    <div class="grid lg:grid-cols-[300px_1fr] gap-5 items-start">
+      <div class="card p-2 max-h-[75vh] overflow-y-auto">
+        <div class="text-[11px] font-bold uppercase tracking-wide text-ink-400 px-3 pt-2 pb-1">Ruas Jalan &amp; Kegiatan Penanganan</div>
+        ${kegiatan.length? kegiatan.map(k=>`
+          <button data-kid="${k.id}" class="w-full text-left p-3 rounded-lg mb-1 ${state.selectedDokKegiatanId===k.id?'bg-[#EEF3FA]':'hover:bg-[#F5F7FA]'}">
+            <div class="text-[11px] font-mono text-ink-400">${fmtDate(k.tanggal_penanganan)}</div>
+            <div class="font-semibold text-[13.5px] text-ink-900">${k.kode_ruas} — ${k.nama_ruas}</div>
+            <div class="text-[12px] text-ink-500 capitalize">${(k.jenis_penanganan||'—').replaceAll('_',' ')}${k.sub_kegiatan? ' · '+k.sub_kegiatan:''}</div>
+          </button>`).join('') : `<div class="p-6 text-center text-ink-400 text-[13px]">Belum ada kegiatan penanganan.</div>`}
+      </div>
+      <div id="dok-detail"><div class="skel h-96 w-full"></div></div>
+    </div>`;
+    v.querySelectorAll('[data-kid]').forEach(btn=>btn.addEventListener('click', ()=>{ state.selectedDokKegiatanId = btn.dataset.kid; viewDokumen(); }));
+    if(state.selectedDokKegiatanId) renderDokDetail(state.selectedDokKegiatanId, kegiatan.find(k=>k.id===state.selectedDokKegiatanId));
+    else document.getElementById('dok-detail').innerHTML = `<div class="card p-10 text-center text-ink-400 text-[13.5px]">Pilih kegiatan penanganan di sebelah kiri.</div>`;
+  }catch(err){ v.innerHTML = errorPanel(err); }
+}
+
+async function renderDokDetail(kegiatanId, kegiatan){
+  const box = document.getElementById('dok-detail');
+  if(!box) return;
+  box.innerHTML = `<div class="skel h-72 w-full"></div>`;
+  try{
+    const rows = await api.dokumenMatrix(kegiatanId);
+    const done = rows.filter(r=>r.status==='sudah').length;
+    const byTahap = {};
+    rows.forEach(r=>{ (byTahap[r.tahap_urutan] ||= {nama:r.tahap_nama, items:[]}).items.push(r); });
+    const tahapKeys = Object.keys(byTahap).sort((a,b)=>a-b);
+    box.innerHTML = `
+    <div class="card p-4 mb-4">
+      <div class="text-[11.5px] font-mono text-ink-400">${fmtDate(kegiatan?.tanggal_penanganan)}</div>
+      <div class="font-display font-bold text-[16px]">${kegiatan?.kode_ruas||''} — ${kegiatan?.nama_ruas||''}</div>
+      <div class="text-[12.5px] text-ink-500 capitalize">${(kegiatan?.jenis_penanganan||'').replaceAll('_',' ')}${kegiatan?.sub_kegiatan?' · '+kegiatan.sub_kegiatan:''}</div>
+      <div class="text-[11.5px] text-ink-400 mt-1 font-mono">${done}/${rows.length} dokumen lengkap</div>
     </div>
-    <form id="form-dok" class="space-y-3">
-      <div><label class="text-[12.5px] font-semibold text-ink-600">Link Dokumen (Google Drive / URL) *</label><input id="dl-link" required placeholder="https://drive.google.com/..." value="${item.link_dokumen||''}"></div>
-      <div><label class="text-[12.5px] font-semibold text-ink-600">Keterangan</label><textarea id="dl-ket" rows="2">${item.dok_keterangan||''}</textarea></div>
-      <div id="dl-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
-      <div class="flex justify-end gap-2 pt-1"><button type="button" data-close class="btn-ghost">Batal</button><button type="submit" class="btn-primary">Simpan</button></div>
-    </form>`);
-  overlay.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click', ()=>overlay.remove()));
-  overlay.querySelector('#form-dok').addEventListener('submit', async (e)=>{
-    e.preventDefault();
-    const errBox = overlay.querySelector('#dl-err');
-    try{
-      await api.updateDokumen(item.dokumen_id, {
-        link_dokumen: overlay.querySelector('#dl-link').value,
-        keterangan: overlay.querySelector('#dl-ket').value || null,
-        status: 'sudah', uploaded_by: state.user.id, tanggal_update: new Date().toISOString(),
+    <div class="flex gap-4 overflow-x-auto pb-2">
+      ${tahapKeys.map(tk=>{
+        const t = byTahap[tk];
+        const tdone = t.items.filter(i=>i.status==='sudah').length;
+        return `<div class="card p-4 shrink-0" style="width:260px">
+          <div class="text-[11px] font-bold uppercase tracking-wide text-navy-700">TAHAP ${tk}</div>
+          <div class="text-[12.5px] font-semibold text-ink-800 mb-1">${t.nama}</div>
+          <div class="text-[11px] text-ink-400 font-mono mb-3">${tdone}/${t.items.length}</div>
+          <div class="space-y-3">
+            ${t.items.map(it=>`
+              <div data-dokid="${it.dokumen_id}">
+                <div class="text-[12.5px] font-medium ${it.status==='sudah'?'text-ink-900':'text-ink-600'}">${it.nama_dokumen}${it.wajib===false?' <span class="text-ink-400">(opsional)</span>':''}</div>
+                ${it.status==='sudah' ? `
+                  <div class="flex items-center flex-wrap gap-2 mt-1">
+                    <span class="badge badge-baik">Lengkap</span>
+                    ${it.link_dokumen?`<a href="${it.link_dokumen}" target="_blank" class="text-[11.5px] text-navy-700 underline">Buka</a>`:''}
+                    ${isEditor()?`<button data-act="undo" class="text-[11px] text-ink-400 hover:text-[var(--bad)]">Batalkan</button>`:''}
+                  </div>` : (isEditor()? `<button data-act="tambah" class="mt-1 w-full text-[12px] text-ink-400 border border-dashed border-line rounded-lg py-1.5 hover:border-navy-600 hover:text-navy-700">+ Tambah</button>` : `<div class="text-[11px] text-ink-400 mt-1">Belum ada</div>`)}
+              </div>`).join('')}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+    if(isEditor()){
+      box.querySelectorAll('[data-act="tambah"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const wrap = btn.closest('[data-dokid]');
+          const dokId = wrap.dataset.dokid;
+          btn.outerHTML = `
+            <div class="flex gap-1.5 mt-1">
+              <input data-link-input placeholder="Link dokumen (opsional)" class="!text-[11.5px] !py-1">
+              <button data-act="save" class="btn-primary !py-1 !px-2.5 !text-[11.5px]">OK</button>
+            </div>`;
+          wrap.querySelector('[data-act="save"]').addEventListener('click', async ()=>{
+            const link = wrap.querySelector('[data-link-input]').value || null;
+            try{
+              await api.updateDokumen(dokId, {status:'sudah', link_dokumen:link, tanggal_update:new Date().toISOString(), uploaded_by:state.user.id});
+              renderDokDetail(kegiatanId, kegiatan);
+            }catch(err){ alert('Gagal menyimpan: '+err.message); }
+          });
+        });
       });
-      overlay.remove(); onDone && onDone();
-    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
-  });
+      box.querySelectorAll('[data-act="undo"]').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          const dokId = btn.closest('[data-dokid]').dataset.dokid;
+          try{ await api.updateDokumen(dokId, {status:'belum'}); renderDokDetail(kegiatanId, kegiatan); }
+          catch(err){ alert('Gagal memperbarui: '+err.message); }
+        });
+      });
+    }
+  }catch(err){ box.innerHTML = errorPanel(err); }
 }
 
 // --- 12. VIEW: ANGGARAN ---------------------------------------------------
@@ -1007,18 +1307,25 @@ async function viewBencana(){
   const v = document.getElementById('view');
   v.innerHTML = `<div class="skel h-96 w-full"></div>`;
   try{
-    const data = await api.bencana();
+    const [data, ruas] = await Promise.all([api.bencana(), api.ruasList()]);
+    state.ruasCache = ruas;
     v.innerHTML = `
-    <div class="mb-5"><h1 class="font-display font-extrabold text-2xl text-ink-900">Kejadian Bencana</h1>
-    <p class="text-ink-500 text-[13.5px]">Catatan longsor, banjir, dan kejadian lain yang berdampak pada ruas jalan</p></div>
-    <div class="space-y-3">
+    <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+      <div><h1 class="font-display font-extrabold text-2xl text-ink-900">Kejadian Bencana</h1>
+      <p class="text-ink-500 text-[13.5px]">Catatan longsor, banjir, dan kejadian lain yang berdampak pada ruas jalan</p></div>
+      ${isEditor()?`<button id="btn-add-bencana" class="btn-accent">+ Tambah Kejadian Bencana</button>`:''}
+    </div>
+    <div class="space-y-3" id="bencana-list">
       ${data.length? data.map(b=>`
-        <div class="card p-4 flex items-start gap-4">
+        <div class="card p-4 flex items-start gap-4" data-bid="${b.id}">
           <div class="w-10 h-10 rounded-lg bg-[#FBE4E4] flex items-center justify-center text-[var(--bad)] shrink-0">${icon('alert','w-5 h-5')}</div>
           <div class="flex-1">
             <div class="flex items-center justify-between flex-wrap gap-2">
               <span class="font-semibold text-[13.5px] capitalize">${(b.jenis_kejadian||'—').replaceAll('_',' ')}</span>
-              <span class="font-mono text-[11.5px] text-ink-400">${fmtDate(b.tanggal_kejadian)}</span>
+              <div class="flex items-center gap-2">
+                <span class="font-mono text-[11.5px] text-ink-400">${fmtDate(b.tanggal_kejadian)}</span>
+                ${isEditor()? actionBtns({onEdit:true, onDelete:isAdmin()}) : ''}
+              </div>
             </div>
             <div class="text-[12.5px] text-ink-500 mt-0.5">${b.segmen_jalan?.ruas_jalan?.nama_ruas || '—'} ${b.segmen_jalan?.kode_segmen? '· '+b.segmen_jalan.kode_segmen : ''}</div>
             ${b.deskripsi? `<p class="text-[13px] text-ink-600 mt-1.5">${b.deskripsi}</p>`:''}
@@ -1026,7 +1333,331 @@ async function viewBencana(){
           </div>
         </div>`).join('') : `<div class="card p-10 text-center text-ink-400 text-[13.5px]">Belum ada kejadian bencana yang tercatat.</div>`}
     </div>`;
+    if(isEditor()){
+      document.getElementById('btn-add-bencana').addEventListener('click', ()=>openBencanaFormModal(ruas, null, ()=>viewBencana()));
+      document.querySelectorAll('#bencana-list [data-bid]').forEach(row=>{
+        const b = data.find(x=>x.id===row.dataset.bid);
+        row.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openBencanaFormModal(ruas, b, ()=>viewBencana()));
+        row.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
+          if(!(await confirmDelete('Hapus catatan kejadian bencana ini?'))) return;
+          try{ await api.deleteBencana(b.id); viewBencana(); }catch(err){ alert('Gagal menghapus: '+err.message); }
+        });
+      });
+    }
   }catch(err){ v.innerHTML = errorPanel(err); }
+}
+
+// --- 13b. VIEW: ASET (JEMBATAN / DRAINASE / PERLENGKAPAN) -----------------
+const ASET_TABS = [
+  {id:'jembatan', label:'Jembatan'},
+  {id:'drainase', label:'Drainase'},
+  {id:'perlengkapan', label:'Perlengkapan Jalan'},
+];
+async function viewAset(){
+  if(!state.asetTab) state.asetTab = 'jembatan';
+  const v = document.getElementById('view');
+  v.innerHTML = `
+    <div class="mb-4"><h1 class="font-display font-extrabold text-2xl text-ink-900">Aset Pendukung Jalan</h1>
+    <p class="text-ink-500 text-[13.5px]">Data jembatan, drainase, dan perlengkapan jalan pada seluruh ruas</p></div>
+    <div class="flex gap-1 mb-4 border-b border-line">
+      ${ASET_TABS.map(t=>`<button data-aset-tab="${t.id}" class="px-4 py-2.5 text-[13px] font-semibold -mb-px border-b-2 ${state.asetTab===t.id?'text-navy-700 border-navy-700':'text-ink-400 border-transparent'}">${t.label}</button>`).join('')}
+    </div>
+    <div id="aset-body"><div class="skel h-96 w-full"></div></div>`;
+  v.querySelectorAll('[data-aset-tab]').forEach(btn=>btn.addEventListener('click', ()=>{ state.asetTab = btn.dataset.asetTab; viewAset(); }));
+  if(state.asetTab==='jembatan') renderJembatanTab();
+  else if(state.asetTab==='drainase') renderDrainaseTab();
+  else renderPerlengkapanTab();
+}
+
+async function loadSegmenOptionsInto(selectEl, ruasId, selectedSegId){
+  if(!ruasId){ selectEl.innerHTML = `<option value="">Pilih ruas terlebih dahulu…</option>`; return; }
+  selectEl.innerHTML = `<option value="">Memuat…</option>`;
+  try{
+    const segs = await api.segmenByRuas(ruasId);
+    selectEl.innerHTML = segs.length? segs.map(s=>`<option value="${s.id}" ${selectedSegId===s.id?'selected':''}>${s.kode_segmen||'Segmen'} (STA ${fmtNum(s.sta_awal,3)}–${fmtNum(s.sta_akhir,3)})</option>`).join('') : `<option value="">Ruas ini belum punya segmen</option>`;
+  }catch(e){ selectEl.innerHTML = `<option value="">Gagal memuat segmen</option>`; }
+}
+
+// --- Jembatan ---
+async function renderJembatanTab(){
+  const box = document.getElementById('aset-body');
+  try{
+    const [data, ruas] = await Promise.all([api.jembatanList(), api.ruasList()]);
+    state.ruasCache = ruas;
+    box.innerHTML = `
+    <div class="flex justify-end mb-3">${isEditor()?`<button id="btn-add-jembatan" class="btn-accent">+ Tambah Jembatan</button>`:''}</div>
+    <div class="card overflow-x-auto">
+      <table><thead><tr><th>Nama Jembatan</th><th>Ruas</th><th>STA</th><th>Panjang (m)</th><th>Lebar (m)</th><th>Konstruksi</th><th>Kondisi</th><th>Tahun</th>${isEditor()?'<th></th>':''}</tr></thead>
+      <tbody>${data.length? data.map(j=>`
+        <tr data-id="${j.id}">
+          <td class="font-medium">${j.nama_jembatan}</td>
+          <td>${j.ruas_jalan?`${j.ruas_jalan.kode_ruas} — ${j.ruas_jalan.nama_ruas}`:'—'}</td>
+          <td class="font-mono">${j.sta!=null?fmtNum(j.sta,3):'—'}</td>
+          <td class="font-mono">${fmtNum(j.panjang_m,1)}</td>
+          <td class="font-mono">${fmtNum(j.lebar_m,1)}</td>
+          <td>${j.jenis_konstruksi||'—'}</td>
+          <td>${badge(j.kondisi)}</td>
+          <td class="font-mono">${j.tahun_dibangun||'—'}</td>
+          ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
+        </tr>`).join('') : `<tr><td colspan="9" class="text-center text-ink-400 py-8">Belum ada data jembatan.</td></tr>`}
+      </tbody></table>
+    </div>`;
+    if(isEditor()){
+      document.getElementById('btn-add-jembatan').addEventListener('click', ()=>openJembatanFormModal(ruas, null, renderJembatanTab));
+      box.querySelectorAll('tr[data-id]').forEach(tr=>{
+        const j = data.find(x=>x.id===tr.dataset.id);
+        tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openJembatanFormModal(ruas, j, renderJembatanTab));
+        tr.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
+          if(!(await confirmDelete('Hapus data jembatan ini?'))) return;
+          try{ await api.deleteJembatan(j.id); renderJembatanTab(); }catch(err){ alert('Gagal menghapus: '+err.message); }
+        });
+      });
+    }
+  }catch(err){ box.innerHTML = errorPanel(err); }
+}
+function openJembatanFormModal(ruasList, editData=null, onSaved=null){
+  const isEdit = !!editData;
+  const overlay = openModal(`
+    <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
+    <h3 class="font-display font-extrabold text-lg mb-4">${isEdit?'Ubah Jembatan':'Tambah Jembatan'}</h3>
+    <form id="form-jembatan" class="space-y-3">
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Ruas Jalan *</label>
+        <select id="jb-ruas" required><option value="">Pilih ruas…</option>${(ruasList||[]).map(r=>`<option value="${r.id}" ${editData?.ruas_id===r.id?'selected':''}>${r.kode_ruas} — ${r.nama_ruas}</option>`).join('')}</select></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Nama Jembatan *</label><input id="jb-nama" required value="${editData?.nama_jembatan||''}"></div>
+      <div class="grid grid-cols-3 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">STA</label><input id="jb-sta" type="number" step="0.001" value="${editData?.sta??''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Panjang (m)</label><input id="jb-panjang" type="number" step="0.01" value="${editData?.panjang_m??''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Lebar (m)</label><input id="jb-lebar" type="number" step="0.01" value="${editData?.lebar_m??''}"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Jenis Konstruksi</label><input id="jb-konstruksi" placeholder="mis. Beton, Rangka Baja" value="${editData?.jenis_konstruksi||''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Tahun Dibangun</label><input id="jb-tahun" type="number" value="${editData?.tahun_dibangun??''}"></div>
+      </div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Kondisi</label>
+        <select id="jb-kondisi">
+          <option value="">—</option>
+          <option value="baik" ${editData?.kondisi==='baik'?'selected':''}>Baik</option>
+          <option value="sedang" ${editData?.kondisi==='sedang'?'selected':''}>Sedang</option>
+          <option value="rusak_ringan" ${editData?.kondisi==='rusak_ringan'?'selected':''}>Rusak Ringan</option>
+          <option value="rusak_berat" ${editData?.kondisi==='rusak_berat'?'selected':''}>Rusak Berat</option>
+        </select></div>
+      <div id="jb-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
+      <button type="submit" class="btn-primary w-full">${isEdit?'Simpan Perubahan':'Simpan Jembatan'}</button>
+    </form>`);
+  overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+  overlay.querySelector('#form-jembatan').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const errBox = overlay.querySelector('#jb-err');
+    const payload = {
+      ruas_id: overlay.querySelector('#jb-ruas').value,
+      nama_jembatan: overlay.querySelector('#jb-nama').value,
+      sta: overlay.querySelector('#jb-sta').value || null,
+      panjang_m: overlay.querySelector('#jb-panjang').value || null,
+      lebar_m: overlay.querySelector('#jb-lebar').value || null,
+      jenis_konstruksi: overlay.querySelector('#jb-konstruksi').value || null,
+      tahun_dibangun: overlay.querySelector('#jb-tahun').value || null,
+      kondisi: overlay.querySelector('#jb-kondisi').value || null,
+    };
+    if(!payload.ruas_id){ errBox.textContent='Pilih ruas jalan.'; errBox.classList.remove('hidden'); return; }
+    try{
+      if(isEdit){ await api.updateJembatan(editData.id, payload); } else { await api.insertJembatan(payload); }
+      overlay.remove();
+      if(onSaved) onSaved();
+    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
+  });
+}
+
+// --- Drainase ---
+async function renderDrainaseTab(){
+  const box = document.getElementById('aset-body');
+  try{
+    const [data, ruas] = await Promise.all([api.drainaseList(), api.ruasList()]);
+    state.ruasCache = ruas;
+    box.innerHTML = `
+    <div class="flex justify-end mb-3">${isEditor()?`<button id="btn-add-drainase" class="btn-accent">+ Tambah Drainase</button>`:''}</div>
+    <div class="card overflow-x-auto">
+      <table><thead><tr><th>Ruas</th><th>Segmen</th><th>Jenis</th><th>Sisi</th><th>Panjang (m)</th><th>Kondisi</th>${isEditor()?'<th></th>':''}</tr></thead>
+      <tbody>${data.length? data.map(d=>`
+        <tr data-id="${d.id}">
+          <td>${d.segmen_jalan?.ruas_jalan? `${d.segmen_jalan.ruas_jalan.kode_ruas} — ${d.segmen_jalan.ruas_jalan.nama_ruas}`:'—'}</td>
+          <td class="font-mono text-[12.5px]">${d.segmen_jalan?.kode_segmen||'—'}</td>
+          <td class="capitalize">${(d.jenis||'—').replaceAll('_',' ')}</td>
+          <td class="capitalize">${d.sisi||'—'}</td>
+          <td class="font-mono">${fmtNum(d.panjang_m,1)}</td>
+          <td>${badge(d.kondisi)}</td>
+          ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
+        </tr>`).join('') : `<tr><td colspan="7" class="text-center text-ink-400 py-8">Belum ada data drainase.</td></tr>`}
+      </tbody></table>
+    </div>`;
+    if(isEditor()){
+      document.getElementById('btn-add-drainase').addEventListener('click', ()=>openDrainaseFormModal(ruas, null, renderDrainaseTab));
+      box.querySelectorAll('tr[data-id]').forEach(tr=>{
+        const d = data.find(x=>x.id===tr.dataset.id);
+        tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openDrainaseFormModal(ruas, d, renderDrainaseTab));
+        tr.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
+          if(!(await confirmDelete('Hapus data drainase ini?'))) return;
+          try{ await api.deleteDrainase(d.id); renderDrainaseTab(); }catch(err){ alert('Gagal menghapus: '+err.message); }
+        });
+      });
+    }
+  }catch(err){ box.innerHTML = errorPanel(err); }
+}
+function openDrainaseFormModal(ruasList, editData=null, onSaved=null){
+  const isEdit = !!editData;
+  const overlay = openModal(`
+    <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
+    <h3 class="font-display font-extrabold text-lg mb-4">${isEdit?'Ubah Drainase':'Tambah Drainase'}</h3>
+    <form id="form-drainase" class="space-y-3">
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Ruas Jalan *</label>
+        <select id="dr-ruas" required><option value="">Pilih ruas…</option>${(ruasList||[]).map(r=>`<option value="${r.id}">${r.kode_ruas} — ${r.nama_ruas}</option>`).join('')}</select></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Segmen *</label><select id="dr-segmen" required><option value="">Pilih ruas terlebih dahulu…</option></select></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Jenis</label>
+          <select id="dr-jenis">
+            <option value="saluran_terbuka" ${editData?.jenis==='saluran_terbuka'?'selected':''}>Saluran Terbuka</option>
+            <option value="saluran_tertutup" ${editData?.jenis==='saluran_tertutup'?'selected':''}>Saluran Tertutup</option>
+            <option value="gorong_gorong" ${editData?.jenis==='gorong_gorong'?'selected':''}>Gorong-gorong</option>
+            <option value="lainnya" ${editData?.jenis==='lainnya'?'selected':''}>Lainnya</option>
+          </select></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Sisi</label>
+          <select id="dr-sisi">
+            <option value="kiri" ${editData?.sisi==='kiri'?'selected':''}>Kiri</option>
+            <option value="kanan" ${editData?.sisi==='kanan'?'selected':''}>Kanan</option>
+            <option value="keduanya" ${editData?.sisi==='keduanya'?'selected':''}>Keduanya</option>
+          </select></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Panjang (m)</label><input id="dr-panjang" type="number" step="0.01" value="${editData?.panjang_m??''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Kondisi</label>
+          <select id="dr-kondisi">
+            <option value="">—</option>
+            <option value="baik" ${editData?.kondisi==='baik'?'selected':''}>Baik</option>
+            <option value="sedang" ${editData?.kondisi==='sedang'?'selected':''}>Sedang</option>
+            <option value="rusak_ringan" ${editData?.kondisi==='rusak_ringan'?'selected':''}>Rusak Ringan</option>
+            <option value="rusak_berat" ${editData?.kondisi==='rusak_berat'?'selected':''}>Rusak Berat</option>
+          </select></div>
+      </div>
+      <div id="dr-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
+      <button type="submit" class="btn-primary w-full">${isEdit?'Simpan Perubahan':'Simpan Drainase'}</button>
+    </form>`);
+  overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+  overlay.querySelector('#dr-ruas').addEventListener('change', (e)=>loadSegmenOptionsInto(overlay.querySelector('#dr-segmen'), e.target.value, null));
+  if(editData?.segmen_jalan?.ruas_jalan){
+    const ruasId = ruasList.find(r=>r.kode_ruas===editData.segmen_jalan.ruas_jalan.kode_ruas)?.id;
+    if(ruasId){ overlay.querySelector('#dr-ruas').value = ruasId; loadSegmenOptionsInto(overlay.querySelector('#dr-segmen'), ruasId, editData.segmen_id); }
+  }
+  overlay.querySelector('#form-drainase').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const errBox = overlay.querySelector('#dr-err');
+    const payload = {
+      segmen_id: overlay.querySelector('#dr-segmen').value,
+      jenis: overlay.querySelector('#dr-jenis').value,
+      sisi: overlay.querySelector('#dr-sisi').value,
+      panjang_m: overlay.querySelector('#dr-panjang').value || null,
+      kondisi: overlay.querySelector('#dr-kondisi').value || null,
+    };
+    if(!payload.segmen_id){ errBox.textContent='Pilih ruas dan segmen terlebih dahulu.'; errBox.classList.remove('hidden'); return; }
+    try{
+      if(isEdit){ await api.updateDrainase(editData.id, payload); } else { await api.insertDrainase(payload); }
+      overlay.remove();
+      if(onSaved) onSaved();
+    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
+  });
+}
+
+// --- Perlengkapan Jalan ---
+async function renderPerlengkapanTab(){
+  const box = document.getElementById('aset-body');
+  try{
+    const [data, ruas] = await Promise.all([api.perlengkapanList(), api.ruasList()]);
+    state.ruasCache = ruas;
+    box.innerHTML = `
+    <div class="flex justify-end mb-3">${isEditor()?`<button id="btn-add-perlengkapan" class="btn-accent">+ Tambah Perlengkapan</button>`:''}</div>
+    <div class="card overflow-x-auto">
+      <table><thead><tr><th>Ruas</th><th>Segmen</th><th>Jenis</th><th>STA</th><th>Jumlah</th><th>Kondisi</th>${isEditor()?'<th></th>':''}</tr></thead>
+      <tbody>${data.length? data.map(p=>`
+        <tr data-id="${p.id}">
+          <td>${p.segmen_jalan?.ruas_jalan? `${p.segmen_jalan.ruas_jalan.kode_ruas} — ${p.segmen_jalan.ruas_jalan.nama_ruas}`:'—'}</td>
+          <td class="font-mono text-[12.5px]">${p.segmen_jalan?.kode_segmen||'—'}</td>
+          <td class="capitalize">${(p.jenis||'—').replaceAll('_',' ')}</td>
+          <td class="font-mono">${p.sta!=null?fmtNum(p.sta,3):'—'}</td>
+          <td class="font-mono">${p.jumlah??'—'}</td>
+          <td>${badge(p.kondisi)}</td>
+          ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
+        </tr>`).join('') : `<tr><td colspan="7" class="text-center text-ink-400 py-8">Belum ada data perlengkapan jalan.</td></tr>`}
+      </tbody></table>
+    </div>`;
+    if(isEditor()){
+      document.getElementById('btn-add-perlengkapan').addEventListener('click', ()=>openPerlengkapanFormModal(ruas, null, renderPerlengkapanTab));
+      box.querySelectorAll('tr[data-id]').forEach(tr=>{
+        const p = data.find(x=>x.id===tr.dataset.id);
+        tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openPerlengkapanFormModal(ruas, p, renderPerlengkapanTab));
+        tr.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
+          if(!(await confirmDelete('Hapus data perlengkapan ini?'))) return;
+          try{ await api.deletePerlengkapan(p.id); renderPerlengkapanTab(); }catch(err){ alert('Gagal menghapus: '+err.message); }
+        });
+      });
+    }
+  }catch(err){ box.innerHTML = errorPanel(err); }
+}
+function openPerlengkapanFormModal(ruasList, editData=null, onSaved=null){
+  const isEdit = !!editData;
+  const overlay = openModal(`
+    <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
+    <h3 class="font-display font-extrabold text-lg mb-4">${isEdit?'Ubah Perlengkapan Jalan':'Tambah Perlengkapan Jalan'}</h3>
+    <form id="form-perlengkapan" class="space-y-3">
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Ruas Jalan *</label>
+        <select id="pl-ruas" required><option value="">Pilih ruas…</option>${(ruasList||[]).map(r=>`<option value="${r.id}">${r.kode_ruas} — ${r.nama_ruas}</option>`).join('')}</select></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Segmen *</label><select id="pl-segmen" required><option value="">Pilih ruas terlebih dahulu…</option></select></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Jenis</label>
+          <select id="pl-jenis">
+            <option value="rambu" ${editData?.jenis==='rambu'?'selected':''}>Rambu</option>
+            <option value="marka" ${editData?.jenis==='marka'?'selected':''}>Marka</option>
+            <option value="guardrail" ${editData?.jenis==='guardrail'?'selected':''}>Guardrail</option>
+            <option value="lampu_jalan" ${editData?.jenis==='lampu_jalan'?'selected':''}>Lampu Jalan</option>
+            <option value="patok_km" ${editData?.jenis==='patok_km'?'selected':''}>Patok KM</option>
+            <option value="lainnya" ${editData?.jenis==='lainnya'?'selected':''}>Lainnya</option>
+          </select></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">STA</label><input id="pl-sta" type="number" step="0.001" value="${editData?.sta??''}"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Jumlah</label><input id="pl-jumlah" type="number" min="1" value="${editData?.jumlah??1}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Kondisi</label>
+          <select id="pl-kondisi">
+            <option value="">—</option>
+            <option value="baik" ${editData?.kondisi==='baik'?'selected':''}>Baik</option>
+            <option value="sedang" ${editData?.kondisi==='sedang'?'selected':''}>Sedang</option>
+            <option value="rusak_ringan" ${editData?.kondisi==='rusak_ringan'?'selected':''}>Rusak Ringan</option>
+            <option value="rusak_berat" ${editData?.kondisi==='rusak_berat'?'selected':''}>Rusak Berat</option>
+          </select></div>
+      </div>
+      <div id="pl-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
+      <button type="submit" class="btn-primary w-full">${isEdit?'Simpan Perubahan':'Simpan Perlengkapan'}</button>
+    </form>`);
+  overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+  overlay.querySelector('#pl-ruas').addEventListener('change', (e)=>loadSegmenOptionsInto(overlay.querySelector('#pl-segmen'), e.target.value, null));
+  if(editData?.segmen_jalan?.ruas_jalan){
+    const ruasId = ruasList.find(r=>r.kode_ruas===editData.segmen_jalan.ruas_jalan.kode_ruas)?.id;
+    if(ruasId){ overlay.querySelector('#pl-ruas').value = ruasId; loadSegmenOptionsInto(overlay.querySelector('#pl-segmen'), ruasId, editData.segmen_id); }
+  }
+  overlay.querySelector('#form-perlengkapan').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const errBox = overlay.querySelector('#pl-err');
+    const payload = {
+      segmen_id: overlay.querySelector('#pl-segmen').value,
+      jenis: overlay.querySelector('#pl-jenis').value,
+      sta: overlay.querySelector('#pl-sta').value || null,
+      jumlah: overlay.querySelector('#pl-jumlah').value || 1,
+      kondisi: overlay.querySelector('#pl-kondisi').value || null,
+    };
+    if(!payload.segmen_id){ errBox.textContent='Pilih ruas dan segmen terlebih dahulu.'; errBox.classList.remove('hidden'); return; }
+    try{
+      if(isEdit){ await api.updatePerlengkapan(editData.id, payload); } else { await api.insertPerlengkapan(payload); }
+      overlay.remove();
+      if(onSaved) onSaved();
+    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
+  });
 }
 
 // --- 14. VIEW: ADMIN (Pengguna) -------------------------------------------
