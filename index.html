@@ -752,6 +752,7 @@ const ICONS = {
   close:'<path d="M18 6 6 18"/><path d="M6 6l12 12"/>',
   collapse:'<path d="M11 17 6 12l5-5"/><path d="M18 17l-5-5 5-5"/>',
   expand:'<path d="M13 17l5-5-5-5"/><path d="M6 17l5-5-5-5"/>',
+  chart:'<path d="M4 20V10M10 20V4M16 20v-7M4 20h16"/>',
 };
 function actionBtns({onEdit, onDelete, onDetail}={}){
   let html = '<div class="flex items-center gap-1.5" onclick="event.stopPropagation()">';
@@ -1274,6 +1275,14 @@ async function viewPeta(){
       <input id="peta-toggle-jembatan" type="checkbox" checked class="w-4 h-4 accent-navy-700">
       ${icon('bridge','w-4 h-4')} Tampilkan Jembatan
     </label>
+    <label class="inline-flex items-center gap-2 text-[12.5px] font-semibold text-ink-600 cursor-pointer select-none">
+      <input id="peta-toggle-bencana" type="checkbox" class="w-4 h-4 accent-navy-700">
+      ${icon('alert','w-4 h-4')} Tampilkan Kejadian Bencana
+    </label>
+    <label class="inline-flex items-center gap-2 text-[12.5px] font-semibold text-ink-600 cursor-pointer select-none">
+      <input id="peta-toggle-lalin" type="checkbox" class="w-4 h-4 accent-navy-700">
+      ${icon('chart','w-4 h-4')} Tampilkan LHR (Lalu Lintas)
+    </label>
   </div>
   <div class="card p-3">
     <div id="map" style="height:560px;"></div>
@@ -1285,6 +1294,18 @@ async function viewPeta(){
   <div class="flex flex-wrap gap-4 mt-2" id="peta-legend-jembatan">
     <div class="flex items-center gap-1.5 text-[12px] text-ink-500">${icon('bridge','w-3.5 h-3.5')} Jembatan — warna menandakan kondisi jembatan itu sendiri</div>
   </div>
+  <div class="hidden flex-wrap gap-4 mt-2" id="peta-legend-bencana">
+    <div class="flex items-center gap-1.5 text-[12px] text-ink-600"><span class="w-2.5 h-2.5 rounded-full" style="background:#C43D3D"></span>Kerusakan berat / putus total</div>
+    <div class="flex items-center gap-1.5 text-[12px] text-ink-600"><span class="w-2.5 h-2.5 rounded-full" style="background:#E0672B"></span>Kerusakan sedang</div>
+    <div class="flex items-center gap-1.5 text-[12px] text-ink-600"><span class="w-2.5 h-2.5 rounded-full" style="background:#8896AC"></span>Ringan / tidak tercatat</div>
+    <div class="text-[11.5px] text-ink-400">Posisi ditampilkan di sepanjang garis ruas terkait (perkiraan, bukan titik presisi)</div>
+  </div>
+  <div class="hidden flex-wrap gap-4 mt-2" id="peta-legend-lalin">
+    <div class="flex items-center gap-1.5 text-[12px] text-ink-600"><span class="w-2.5 h-2.5 rounded-full" style="background:#C43D3D"></span>LHR tinggi (relatif terhadap data yang ada)</div>
+    <div class="flex items-center gap-1.5 text-[12px] text-ink-600"><span class="w-2.5 h-2.5 rounded-full" style="background:#E0672B"></span>LHR sedang</div>
+    <div class="flex items-center gap-1.5 text-[12px] text-ink-600"><span class="w-2.5 h-2.5 rounded-full" style="background:#2E8B57"></span>LHR rendah</div>
+    <div class="text-[11.5px] text-ink-400">Menampilkan data tahun terbaru per ruas, ditempatkan di titik tengah ruas</div>
+  </div>
   <div id="map-empty" class="hidden mt-4">${emptyStateMap()}</div>`;
 
   if(state.map){ state.map.remove(); state.map = null; }
@@ -1293,6 +1314,8 @@ async function viewPeta(){
   state.map = map;
   const layerGroup = L.layerGroup().addTo(map);
   const jembatanLayerGroup = L.layerGroup().addTo(map);
+  const bencanaLayerGroup = L.layerGroup();
+  const lalinLayerGroup = L.layerGroup();
 
   const LEGEND_KONDISI = `${KONDISI_ORDER.map(k=>`<div class="flex items-center gap-1.5 text-[12px] text-ink-600"><span class="w-2.5 h-2.5 rounded-full" style="background:${KONDISI_COLOR[k]}"></span>${KONDISI_LABEL[k]}</div>`).join('')}
     <div class="flex items-center gap-1.5 text-[12px] text-ink-600"><span class="w-2.5 h-2.5 rounded-full" style="background:#8896AC"></span>Belum disurvei</div>`;
@@ -1310,7 +1333,26 @@ async function viewPeta(){
   }
 
   try{
-    const [ruas, kondisi, skorList, jembatan] = await Promise.all([api.ruasList(), api.kondisiTerkini(), api.skorPrioritasAll().catch(()=>[]), api.jembatanList().catch(()=>[])]);
+    const [ruas, kondisi, skorList, jembatan, bencanaList, lalinList] = await Promise.all([api.ruasList(), api.kondisiTerkini(), api.skorPrioritasAll().catch(()=>[]), api.jembatanList().catch(()=>[]), api.bencana().catch(()=>[]), api.lalulintasList().catch(()=>[])]);
+    const ruasMap = new Map(ruas.map(r=>[r.id, r]));
+    // titik pada sebuah LineString berdasarkan fraksi jarak indeks vertex (0=awal, 1=akhir)
+    function pointAlongLine(coords, fraction){
+      if(!coords || !coords.length) return null;
+      if(coords.length===1) return coords[0];
+      const idx = Math.max(0, Math.min(1, fraction)) * (coords.length - 1);
+      const lo = Math.floor(idx), hi = Math.ceil(idx);
+      if(lo===hi) return coords[lo];
+      const t = idx - lo;
+      return [coords[lo][0] + (coords[hi][0]-coords[lo][0])*t, coords[lo][1] + (coords[hi][1]-coords[lo][1])*t];
+    }
+    function ruasLineCoords(ruasId){
+      const r = ruasMap.get(ruasId);
+      if(!r) return null;
+      const parsed = geomToLatLngs(r.geom);
+      if(!parsed || parsed.type !== 'LineString') return null;
+      const coords = parsed.coords.filter(c=>Array.isArray(c) && Number.isFinite(c[0]) && Number.isFinite(c[1]));
+      return coords.length>=2 ? {r, coords} : null;
+    }
     // worst kondisi per ruas
     const worstByRuas = {};
     kondisi.forEach(row=>{
@@ -1400,7 +1442,65 @@ async function viewPeta(){
       });
     }
 
-    function drawSafe(){ try{ draw(); }catch(e){ console.error('Peta: draw() gagal total ->', e); } try{ drawJembatan(); }catch(e){ console.error('Peta: drawJembatan() gagal ->', e); } }
+    function drawBencana(){
+      bencanaLayerGroup.clearLayers();
+      const byRuas = {};
+      bencanaList.forEach(b=>{ if(!b.ruas_id) return; (byRuas[b.ruas_id] = byRuas[b.ruas_id] || []).push(b); });
+      Object.entries(byRuas).forEach(([ruasId, items])=>{
+        try{
+          const line = ruasLineCoords(ruasId);
+          if(!line) return;
+          const sorted = [...items].sort((a,b)=>(a.tanggal_kejadian||'').localeCompare(b.tanggal_kejadian||''));
+          sorted.forEach((b,i)=>{
+            const frac = (i+1)/(sorted.length+1);
+            const pt = pointAlongLine(line.coords, frac);
+            if(!pt) return;
+            const berat = b.tingkat_kerusakan==='berat' || b.tingkat_kerusakan==='putus_total';
+            const color = berat ? '#C43D3D' : (b.tingkat_kerusakan==='sedang' ? '#E0672B' : '#8896AC');
+            const divIcon = L.divIcon({
+              className: '',
+              html: `<div style="background:${color};width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.35);border:2px solid #fff;color:#fff">${icon('alert','w-3 h-3')}</div>`,
+              iconSize: [20,20], iconAnchor: [10,10],
+            });
+            const marker = L.marker(pt, {icon: divIcon});
+            marker.bindPopup(`<b class="capitalize">${(b.jenis_kejadian||'—').replaceAll('_',' ')}</b><br>${line.r.kode_ruas} — ${line.r.nama_ruas}<br>${fmtDate(b.tanggal_kejadian)}${b.tingkat_kerusakan?`<br>Kerusakan: <span style="color:${color}">${b.tingkat_kerusakan.replaceAll('_',' ')}</span>`:''}<br><span style="color:#8896AC;font-size:11px">Posisi perkiraan di sepanjang ruas</span>`);
+            marker.addTo(bencanaLayerGroup);
+          });
+        }catch(e){ console.warn('Peta: lewati bencana pada ruas ->', ruasId, e); }
+      });
+    }
+
+    function drawLalin(){
+      lalinLayerGroup.clearLayers();
+      const latestByRuas = {};
+      lalinList.forEach(l=>{
+        const ruasId = l.segmen_jalan?.ruas_jalan?.id;
+        if(!ruasId) return;
+        const cur = latestByRuas[ruasId];
+        if(!cur || Number(l.tahun) > Number(cur.tahun)) latestByRuas[ruasId] = l;
+      });
+      const maxLhr = Math.max(1, ...Object.values(latestByRuas).map(l=>Number(l.lhr)||0));
+      Object.entries(latestByRuas).forEach(([ruasId, l])=>{
+        try{
+          const line = ruasLineCoords(ruasId);
+          if(!line) return;
+          const pt = pointAlongLine(line.coords, 0.5);
+          if(!pt) return;
+          const ratio = Math.min(1, (Number(l.lhr)||0)/maxLhr);
+          const color = ratio>=0.66 ? '#C43D3D' : ratio>=0.33 ? '#E0672B' : '#2E8B57';
+          const marker = L.circleMarker(pt, {radius: 6+ratio*10, color, fillColor:color, fillOpacity:.55, weight:2});
+          marker.bindPopup(`<b>${line.r.kode_ruas}</b> — ${line.r.nama_ruas}<br>LHR ${l.tahun}: <b>${fmtNum(l.lhr,0)}</b> smp/hari${l.sumber_data?`<br>Sumber: ${l.sumber_data}`:''}`);
+          marker.addTo(lalinLayerGroup);
+        }catch(e){ console.warn('Peta: lewati data LHR pada ruas ->', ruasId, e); }
+      });
+    }
+
+    function drawSafe(){
+      try{ draw(); }catch(e){ console.error('Peta: draw() gagal total ->', e); }
+      try{ drawJembatan(); }catch(e){ console.error('Peta: drawJembatan() gagal ->', e); }
+      try{ drawBencana(); }catch(e){ console.error('Peta: drawBencana() gagal ->', e); }
+      try{ drawLalin(); }catch(e){ console.error('Peta: drawLalin() gagal ->', e); }
+    }
 
     drawSafe();
 
@@ -1424,6 +1524,14 @@ async function viewPeta(){
     document.getElementById('peta-toggle-jembatan').addEventListener('change', (e)=>{
       if(e.target.checked){ jembatanLayerGroup.addTo(map); document.getElementById('peta-legend-jembatan').classList.remove('hidden'); }
       else { map.removeLayer(jembatanLayerGroup); document.getElementById('peta-legend-jembatan').classList.add('hidden'); }
+    });
+    document.getElementById('peta-toggle-bencana').addEventListener('change', (e)=>{
+      if(e.target.checked){ bencanaLayerGroup.addTo(map); document.getElementById('peta-legend-bencana').classList.remove('hidden'); document.getElementById('peta-legend-bencana').classList.add('flex'); }
+      else { map.removeLayer(bencanaLayerGroup); document.getElementById('peta-legend-bencana').classList.add('hidden'); document.getElementById('peta-legend-bencana').classList.remove('flex'); }
+    });
+    document.getElementById('peta-toggle-lalin').addEventListener('change', (e)=>{
+      if(e.target.checked){ lalinLayerGroup.addTo(map); document.getElementById('peta-legend-lalin').classList.remove('hidden'); document.getElementById('peta-legend-lalin').classList.add('flex'); }
+      else { map.removeLayer(lalinLayerGroup); document.getElementById('peta-legend-lalin').classList.add('hidden'); document.getElementById('peta-legend-lalin').classList.remove('flex'); }
     });
   }catch(err){ v.insertAdjacentHTML('beforeend', errorPanel(err)); }
 }
