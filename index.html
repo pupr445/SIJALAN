@@ -1010,7 +1010,20 @@ async function viewPeta(){
   }
 
   try{
+    const {data:{session:__debugSession}} = await sb.auth.getSession();
     const [ruas, kondisi, skorList] = await Promise.all([api.ruasList(), api.kondisiTerkini(), api.skorPrioritasAll().catch(()=>[])]);
+    // === DEBUG SEMENTARA — hapus blok ini setelah selesai verifikasi ===
+    const __debugInfo = `
+      <div style="background:#FFF7E0;border:1px solid #E0C060;border-radius:8px;padding:12px;margin-top:12px;font-family:monospace;font-size:12px;white-space:pre-wrap;">
+DEBUG PETA
+Login sebagai: ${__debugSession ? (__debugSession.user.email + ' (role token: authenticated)') : 'TIDAK LOGIN (role token: anon)'}
+Sesi kadaluarsa pada: ${__debugSession ? new Date(__debugSession.expires_at*1000).toLocaleString() : '-'}
+Jumlah ruas diterima dari API: ${ruas.length}
+Contoh 3 baris pertama:
+${ruas.slice(0,3).map(r=>`  - ${r.kode_ruas||'(tanpa kode)'} | geom: ${r.geom ? ('ADA (' + r.geom.length + ' karakter, awalan: ' + r.geom.slice(0,12) + '...)') : 'NULL/KOSONG'}`).join('\n') || '  (array kosong)'}
+      </div>`;
+    v.insertAdjacentHTML('beforeend', __debugInfo);
+    // === AKHIR BLOK DEBUG ===
     // worst kondisi per ruas
     const worstByRuas = {};
     kondisi.forEach(row=>{
