@@ -185,11 +185,27 @@ async function hydrateFotoThumbs(container){
       if(ph) ph.remove();
     });
     img.addEventListener('error', (e)=>{ console.error('[foto] gagal memuat gambar dari signed URL:', url); });
-    // Semua thumbnail foto (termasuk di Riwayat Survei Kondisi) bisa diklik untuk preview ukuran penuh.
+    // Semua thumbnail foto (termasuk di Riwayat Survei Kondisi) bisa diklik untuk preview ukuran penuh
+    // langsung di dalam aplikasi (lightbox), tanpa membuka tab/jendela baru.
     img.classList.add('cursor-zoom-in');
-    img.addEventListener('click', (e)=>{ e.stopPropagation(); if(img.src) window.open(img.src, '_blank'); });
+    img.addEventListener('click', (e)=>{ e.stopPropagation(); if(img.src) openFotoLightbox(img.src); });
     img.src = url;
   });
+}
+// Lightbox untuk preview foto ukuran penuh di dalam aplikasi (tanpa tab/jendela baru).
+function openFotoLightbox(src){
+  const overlay = el(`<div class="modal-overlay fixed inset-0 z-50 flex items-center justify-center p-4"></div>`);
+  overlay.innerHTML = `
+    <div class="relative max-w-[94vw] max-h-[94vh] flex items-center justify-center">
+      <img src="${src}" class="max-w-[94vw] max-h-[94vh] object-contain rounded-xl shadow-2xl" alt="Preview foto dokumentasi">
+      <button data-close type="button" aria-label="Tutup" class="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-white text-ink-900 shadow flex items-center justify-center hover:text-[var(--bad)]">✕</button>
+    </div>`;
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+  const onEsc = (e)=>{ if(e.key==='Escape'){ overlay.remove(); document.removeEventListener('keydown', onEsc); } };
+  document.addEventListener('keydown', onEsc);
+  document.body.appendChild(overlay);
+  return overlay;
 }
 // Preview file gambar yang baru dipilih user di <input type=file> ke elemen <img>.
 function wirePhotoPreview(inputEl, imgEl, placeholderEl){
@@ -813,6 +829,7 @@ async function viewRuasDetail(id){
                 <div class="min-w-0">
                   <div class="font-semibold text-[13.5px]">${s.segmen_jalan?.kode_segmen||'Segmen'} <span class="text-ink-400 font-normal">· ${fmtDate(s.tanggal_survei)}</span></div>
                   <div class="text-[12.5px] text-ink-500 mt-0.5">STA ${fmtNum(s.segmen_jalan?.sta_awal,3)}–${fmtNum(s.segmen_jalan?.sta_akhir,3)} ${s.nilai_iri?'· IRI '+fmtNum(s.nilai_iri,2):''} ${s.metode_survei?'· '+s.metode_survei.replaceAll('_',' '):''}</div>
+                  ${s.link_dokumentasi?`<a href="${s.link_dokumentasi}" target="_blank" rel="noopener" class="text-navy-700 text-[12px] underline break-all">Buka Link Dokumentasi</a>`:''}
                 </div>
               </div>
               <div class="flex items-center gap-2 shrink-0">${badge(s.kondisi)}${isEditor()? actionBtns({onEdit:true, onDelete:isAdmin()}) : ''}</div>
@@ -1031,8 +1048,13 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
       </div>
       <div><label class="text-[12.5px] font-semibold text-ink-600">Catatan</label><textarea id="sv-catatan" rows="2">${editData?.catatan||''}</textarea></div>
       <div>
+        <label class="text-[12.5px] font-semibold text-ink-600">Link Dokumentasi</label>
+        <p class="text-[11.5px] text-ink-400 mt-0.5 mb-1.5">Opsional. Tempel link folder foto/video (mis. Google Drive/Photos) di sini agar tidak perlu unggah banyak foto satu per satu ke aplikasi.</p>
+        <input id="sv-link" type="url" placeholder="https://…" value="${editData?.link_dokumentasi||''}">
+      </div>
+      <div>
         <label class="text-[12.5px] font-semibold text-ink-600">Foto Kondisi</label>
-        <p class="text-[11.5px] text-ink-400 mt-0.5 mb-1.5">Bisa pilih lebih dari satu foto sekaligus, atau tambahkan bertahap. Tidak ada batas jumlah foto.</p>
+        <p class="text-[11.5px] text-ink-400 mt-0.5 mb-1.5">Bisa pilih lebih dari satu foto sekaligus, atau tambahkan bertahap. Untuk foto dalam jumlah banyak, lebih disarankan pakai Link Dokumentasi di atas.</p>
         <div id="sv-foto-existing" class="flex flex-wrap gap-2 mb-1.5"></div>
         <div id="sv-foto-new" class="flex flex-wrap gap-2 mb-1.5"></div>
         <input id="sv-foto" type="file" accept="image/*" multiple class="!py-1.5 text-[12px] w-full">
@@ -1064,6 +1086,7 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
         nilai_iri: overlay.querySelector('#sv-iri').value || null,
         metode_survei: getMetodeSurvei(),
         catatan: overlay.querySelector('#sv-catatan').value || null,
+        link_dokumentasi: overlay.querySelector('#sv-link').value || null,
         foto_paths: fotoPaths,
         foto_path: fotoPaths[0] || null,
       };
