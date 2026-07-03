@@ -856,57 +856,102 @@ function renderLogin(){
         <div class="flex justify-between max-w-md mt-2 text-[11px] text-[#7C8FAE] font-mono"><span>STA 0+000</span><span>Kondisi jaringan real-time</span></div>
       </div>
     </div>
-    <div class="flex items-center justify-center p-8 relative overflow-hidden">
-      <!-- Aksen latar: pola rute jalan tipis, dekoratif -->
-      <svg class="absolute -top-10 -right-16 w-[380px] h-[380px] opacity-[0.05] pointer-events-none" viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <div class="flex flex-col p-6 lg:p-10 relative overflow-hidden bg-white">
+      <!-- Aksen latar: blob warna, pola titik & rute jalan, dekoratif -->
+      <div class="absolute -top-24 -right-20 w-72 h-72 rounded-full bg-accent/[0.14] blur-3xl pointer-events-none"></div>
+      <div class="absolute -bottom-28 -left-16 w-80 h-80 rounded-full bg-[var(--navy-600)]/[0.09] blur-3xl pointer-events-none"></div>
+      <div class="absolute top-[38%] right-[8%] w-40 h-40 rounded-full bg-[var(--good)]/[0.08] blur-2xl pointer-events-none"></div>
+      <div class="absolute inset-0 opacity-[0.04] pointer-events-none" style="background-image:radial-gradient(#0A2036 1.2px, transparent 1.2px); background-size:24px 24px;"></div>
+      <svg class="absolute -top-10 -right-16 w-[380px] h-[380px] opacity-[0.07] pointer-events-none" viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M-20 340 C 80 340, 90 220, 180 210 S 300 120, 260 30 S 360 -30, 420 20" stroke="var(--navy-900)" stroke-width="10" stroke-linecap="round"/>
         <path d="M-20 340 C 80 340, 90 220, 180 210 S 300 120, 260 30 S 360 -30, 420 20" stroke="#fff" stroke-width="2" stroke-dasharray="10 10" stroke-linecap="round"/>
       </svg>
-      <div class="w-full max-w-sm relative">
-        <div class="lg:hidden flex items-center justify-center gap-3 mb-4">
+      <svg class="absolute -bottom-16 -left-16 w-[300px] h-[300px] opacity-[0.06] pointer-events-none rotate-180" viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M-20 340 C 80 340, 90 220, 180 210 S 300 120, 260 30 S 360 -30, 420 20" stroke="var(--accent-dark)" stroke-width="10" stroke-linecap="round"/>
+      </svg>
+
+      <!-- Bar atas: logo & status sistem -->
+      <div class="relative flex items-center justify-between shrink-0">
+        <div class="lg:hidden flex items-center gap-2.5">
           <img src="https://upload.wikimedia.org/wikipedia/commons/c/c6/Logo_Kementerian_Pekerjaan_Umum_Republik_Indonesia.svg" alt="Logo Kementerian PUPR" class="h-8 w-8 object-contain" onerror="this.style.display='none'">
           <img src="https://upload.wikimedia.org/wikipedia/commons/e/e9/Coat_of_Arms_of_East_Nusa_Tenggara_NEW.png" alt="Lambang Provinsi Nusa Tenggara Timur" class="h-8 w-8 object-contain" onerror="this.style.display='none'">
+          <div class="font-display font-extrabold text-lg tracking-tight ml-1"><span class="text-accent">SI</span><span class="text-navy-900">JALAN</span></div>
         </div>
-        <div class="lg:hidden flex items-center justify-center mb-8">
-          <div class="font-display font-extrabold text-xl tracking-tight"><span class="text-accent">SI</span><span class="text-navy-900">JALAN</span></div>
-        </div>
-        <div class="hidden lg:flex items-center gap-2.5 mb-5">
+        <div class="hidden lg:flex items-center gap-2.5">
           <img src="https://upload.wikimedia.org/wikipedia/commons/c/c6/Logo_Kementerian_Pekerjaan_Umum_Republik_Indonesia.svg" alt="Logo Kementerian PUPR" class="h-7 w-7 object-contain" onerror="this.style.display='none'">
           <img src="https://upload.wikimedia.org/wikipedia/commons/e/e9/Coat_of_Arms_of_East_Nusa_Tenggara_NEW.png" alt="Lambang Provinsi Nusa Tenggara Timur" class="h-7 w-7 object-contain" onerror="this.style.display='none'">
           <span class="text-[11.5px] text-ink-400 font-medium ml-1">Sistem resmi Dinas PUPR Provinsi NTT</span>
         </div>
-        <!-- Ilustrasi peta jalan: rute dengan penanda ruas, sebagai aksen visual di atas form -->
-        <div class="mb-5 rounded-2xl bg-[#F5F7FB] p-4 flex items-center gap-3.5 border border-line">
-          <svg class="shrink-0" width="56" height="56" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M6 44 C 14 44, 15 30, 24 28 S 40 26, 42 14" stroke="var(--navy-700)" stroke-width="4" stroke-linecap="round"/>
-            <path d="M6 44 C 14 44, 15 30, 24 28 S 40 26, 42 14" stroke="#fff" stroke-width="1.4" stroke-dasharray="3.5 3.5" stroke-linecap="round"/>
-            <circle cx="6" cy="44" r="4" fill="var(--accent)"/>
-            <circle cx="24" cy="28" r="3" fill="var(--navy-700)"/>
-            <path d="M42 6c-5 0-8 3.6-8 8 0 6 8 14 8 14s8-8 8-14c0-4.4-3-8-8-8z" fill="var(--accent-dark)"/>
-            <circle cx="42" cy="14" r="3" fill="#fff"/>
-          </svg>
-          <div class="leading-tight">
-            <div class="text-[12.5px] font-bold text-ink-900">Pantau ruas jalan real-time</div>
-            <div class="text-[11.5px] text-ink-500 mt-0.5">Kondisi, riwayat penanganan &amp; anggaran — satu peta untuk seluruh NTT.</div>
+        <span class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[var(--good)] bg-[#E7F5EC] rounded-full pl-2 pr-2.5 py-1">
+          <span class="relative flex h-1.5 w-1.5"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--good)] opacity-75"></span><span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-[var(--good)]"></span></span>
+          <span class="hidden sm:inline">Sistem&nbsp;Online</span>
+        </span>
+      </div>
+
+      <!-- Form login, ditengahkan secara vertikal -->
+      <div class="relative flex-1 flex items-center justify-center py-6 min-h-0">
+        <div class="w-full max-w-sm">
+          <!-- Ilustrasi peta jalan: rute dengan penanda ruas, sebagai aksen visual di atas form -->
+          <div class="mb-5 rounded-2xl bg-gradient-to-br from-[#F5F7FB] to-[#EEF2FA] p-4 flex items-center gap-3.5 border border-line">
+            <svg class="shrink-0" width="56" height="56" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M6 44 C 14 44, 15 30, 24 28 S 40 26, 42 14" stroke="var(--navy-700)" stroke-width="4" stroke-linecap="round"/>
+              <path d="M6 44 C 14 44, 15 30, 24 28 S 40 26, 42 14" stroke="#fff" stroke-width="1.4" stroke-dasharray="3.5 3.5" stroke-linecap="round"/>
+              <circle cx="6" cy="44" r="4" fill="var(--accent)"/>
+              <circle cx="24" cy="28" r="3" fill="var(--navy-700)"/>
+              <path d="M42 6c-5 0-8 3.6-8 8 0 6 8 14 8 14s8-8 8-14c0-4.4-3-8-8-8z" fill="var(--accent-dark)"/>
+              <circle cx="42" cy="14" r="3" fill="#fff"/>
+            </svg>
+            <div class="leading-tight">
+              <div class="text-[12.5px] font-bold text-ink-900">Pantau ruas jalan real-time</div>
+              <div class="text-[11.5px] text-ink-500 mt-0.5">Kondisi, riwayat penanganan &amp; anggaran — satu peta untuk seluruh NTT.</div>
+            </div>
+          </div>
+          <h2 class="font-display font-extrabold text-2xl text-ink-900 mb-1">Masuk ke akun</h2>
+          <p class="text-ink-500 text-[13.5px] mb-6">Gunakan akun dinas Anda untuk mengakses data.</p>
+          <div id="auth-error" class="hidden mb-4 text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
+          <form id="form-login" class="space-y-3">
+            <div><label class="text-[12.5px] font-semibold text-ink-600">Email</label><input type="email" id="li-email" required placeholder="nama@ntt-prov.go.id"></div>
+            <div><label class="text-[12.5px] font-semibold text-ink-600">Kata sandi</label><input type="password" id="li-pass" required placeholder="••••••••"></div>
+            <button type="submit" class="btn-primary w-full mt-2">Masuk</button>
+          </form>
+          <div class="text-center my-5 text-[12px] text-ink-400 flex items-center gap-3"><span class="flex-1 h-px bg-line"></span>atau<span class="flex-1 h-px bg-line"></span></div>
+          <button id="toggle-register" class="btn-ghost w-full">Buat akun baru</button>
+          <form id="form-register" class="space-y-3 hidden mt-3">
+            <div><label class="text-[12.5px] font-semibold text-ink-600">Nama lengkap</label><input type="text" id="rg-nama" required></div>
+            <div><label class="text-[12.5px] font-semibold text-ink-600">Email</label><input type="email" id="rg-email" required></div>
+            <div><label class="text-[12.5px] font-semibold text-ink-600">Kata sandi</label><input type="password" id="rg-pass" required minlength="6"></div>
+            <button type="submit" class="btn-accent w-full">Daftar akun</button>
+            <p class="text-[11.5px] text-ink-400">Akun baru mendapat peran <b>Peninjau</b> secara default. Hubungi administrator untuk peningkatan akses.</p>
+          </form>
+        </div>
+      </div>
+
+      <!-- Bar bawah: statistik ringkas & legenda kondisi jalan, mengisi ruang kosong -->
+      <div class="relative max-w-sm w-full mx-auto shrink-0">
+        <div class="grid grid-cols-3 gap-2.5 mb-4">
+          <div class="rounded-xl border border-line bg-white/70 px-2.5 py-2.5 text-center">
+            <div class="w-7 h-7 rounded-lg bg-[#FCF1DF] text-[var(--accent-dark)] flex items-center justify-center mx-auto mb-1.5">${icon('map','w-4 h-4')}</div>
+            <div class="font-display font-extrabold text-[15px] text-ink-900 leading-none">22</div>
+            <div class="text-[10px] text-ink-500 mt-1 leading-tight">Kabupaten/Kota</div>
+          </div>
+          <div class="rounded-xl border border-line bg-white/70 px-2.5 py-2.5 text-center">
+            <div class="w-7 h-7 rounded-lg bg-[#E7F0FB] text-[var(--navy-600)] flex items-center justify-center mx-auto mb-1.5">${icon('road','w-4 h-4')}</div>
+            <div class="font-display font-extrabold text-[15px] text-ink-900 leading-none">4</div>
+            <div class="text-[10px] text-ink-500 mt-1 leading-tight">Tingkat Kondisi</div>
+          </div>
+          <div class="rounded-xl border border-line bg-white/70 px-2.5 py-2.5 text-center">
+            <div class="w-7 h-7 rounded-lg bg-[#E7F5EC] text-[var(--good)] flex items-center justify-center mx-auto mb-1.5">${icon('check','w-4 h-4')}</div>
+            <div class="font-display font-extrabold text-[15px] text-ink-900 leading-none">Live</div>
+            <div class="text-[10px] text-ink-500 mt-1 leading-tight">Update Lapangan</div>
           </div>
         </div>
-        <h2 class="font-display font-extrabold text-2xl text-ink-900 mb-1">Masuk ke akun</h2>
-        <p class="text-ink-500 text-[13.5px] mb-6">Gunakan akun dinas Anda untuk mengakses data.</p>
-        <div id="auth-error" class="hidden mb-4 text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
-        <form id="form-login" class="space-y-3">
-          <div><label class="text-[12.5px] font-semibold text-ink-600">Email</label><input type="email" id="li-email" required placeholder="nama@ntt-prov.go.id"></div>
-          <div><label class="text-[12.5px] font-semibold text-ink-600">Kata sandi</label><input type="password" id="li-pass" required placeholder="••••••••"></div>
-          <button type="submit" class="btn-primary w-full mt-2">Masuk</button>
-        </form>
-        <div class="text-center my-5 text-[12px] text-ink-400 flex items-center gap-3"><span class="flex-1 h-px bg-line"></span>atau<span class="flex-1 h-px bg-line"></span></div>
-        <button id="toggle-register" class="btn-ghost w-full">Buat akun baru</button>
-        <form id="form-register" class="space-y-3 hidden mt-3">
-          <div><label class="text-[12.5px] font-semibold text-ink-600">Nama lengkap</label><input type="text" id="rg-nama" required></div>
-          <div><label class="text-[12.5px] font-semibold text-ink-600">Email</label><input type="email" id="rg-email" required></div>
-          <div><label class="text-[12.5px] font-semibold text-ink-600">Kata sandi</label><input type="password" id="rg-pass" required minlength="6"></div>
-          <button type="submit" class="btn-accent w-full">Daftar akun</button>
-          <p class="text-[11.5px] text-ink-400">Akun baru mendapat peran <b>Peninjau</b> secara default. Hubungi administrator untuk peningkatan akses.</p>
-        </form>
+        <div class="rounded-xl border border-line bg-[#F8FAFC] px-3.5 py-2.5 flex items-center justify-between flex-wrap gap-y-1.5">
+          <span class="flex items-center gap-1.5 text-[10.5px] font-semibold text-ink-600"><span class="w-2 h-2 rounded-full" style="background:var(--good)"></span>Baik</span>
+          <span class="flex items-center gap-1.5 text-[10.5px] font-semibold text-ink-600"><span class="w-2 h-2 rounded-full" style="background:var(--fair)"></span>Sedang</span>
+          <span class="flex items-center gap-1.5 text-[10.5px] font-semibold text-ink-600"><span class="w-2 h-2 rounded-full" style="background:var(--poor)"></span>Rusak Ringan</span>
+          <span class="flex items-center gap-1.5 text-[10.5px] font-semibold text-ink-600"><span class="w-2 h-2 rounded-full" style="background:var(--bad)"></span>Rusak Berat</span>
+        </div>
+        <p class="text-center text-[10.5px] text-ink-400 mt-4">© 2026 Dinas PUPR Provinsi NTT — Bidang Bina Marga</p>
       </div>
     </div>
   </div>`;
