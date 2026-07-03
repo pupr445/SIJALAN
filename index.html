@@ -1059,37 +1059,46 @@ async function viewPeta(){
       layerGroup.clearLayers();
       drawn = 0;
       const bounds = [];
+      const skippedRuas = [];
       ruas.forEach(r=>{
-        const parsed = geomToLatLngs(r.geom);
-        if(!parsed) return;
-        // --- validasi: buang koordinat NaN dan titik duplikat berurutan ---
-        const isValidLatLng = c => Array.isArray(c) && Number.isFinite(c[0]) && Number.isFinite(c[1]);
-        if(parsed.type === 'LineString'){
-          const valid = parsed.coords.filter(isValidLatLng);
-          const dedup = valid.filter((c,i)=> i===0 || c[0]!==valid[i-1][0] || c[1]!==valid[i-1][1]);
-          if(dedup.length < 2) return; // garis "nol panjang" / data cacat, lewati
-          parsed.coords = dedup;
-        } else if(parsed.type === 'Point'){
-          if(!isValidLatLng(parsed.coords)) return;
-        } else return;
-        let color, popupInfo;
-        if(mode === 'kondisi'){
-          const k = worstByRuas[r.id];
-          color = k ? KONDISI_COLOR[k] : '#8896AC';
-          popupInfo = `<span style="color:${color}">${k?KONDISI_LABEL[k]:'Belum disurvei'}</span>`;
-        } else {
-          const skor = skorByRuas[r.id];
-          color = skorToColor(skor);
-          popupInfo = skor!=null ? `<span style="color:${color}">Skor prioritas: ${fmtNum(skor,1)}</span>` : `<span style="color:${color}">Belum ada skor prioritas</span>`;
+        try{
+          const parsed = geomToLatLngs(r.geom);
+          if(!parsed) return;
+          // --- validasi: buang koordinat NaN dan titik duplikat berurutan ---
+          const isValidLatLng = c => Array.isArray(c) && Number.isFinite(c[0]) && Number.isFinite(c[1]);
+          if(parsed.type === 'LineString'){
+            const valid = parsed.coords.filter(isValidLatLng);
+            const dedup = valid.filter((c,i)=> i===0 || c[0]!==valid[i-1][0] || c[1]!==valid[i-1][1]);
+            if(dedup.length < 2) return; // garis "nol panjang" / data cacat, lewati
+            parsed.coords = dedup;
+          } else if(parsed.type === 'Point'){
+            if(!isValidLatLng(parsed.coords)) return;
+          } else return;
+          let color, popupInfo;
+          if(mode === 'kondisi'){
+            const k = worstByRuas[r.id];
+            color = k ? KONDISI_COLOR[k] : '#8896AC';
+            popupInfo = `<span style="color:${color}">${k?KONDISI_LABEL[k]:'Belum disurvei'}</span>`;
+          } else {
+            const skor = skorByRuas[r.id];
+            color = skorToColor(skor);
+            popupInfo = skor!=null ? `<span style="color:${color}">Skor prioritas: ${fmtNum(skor,1)}</span>` : `<span style="color:${color}">Belum ada skor prioritas</span>`;
+          }
+          let layer;
+          if(parsed.type === 'LineString'){ layer = L.polyline(parsed.coords, {color, weight:5, opacity:.85}); parsed.coords.forEach(c=>bounds.push(c)); }
+          else { layer = L.circleMarker(parsed.coords, {radius:7, color, fillColor:color, fillOpacity:.9}); bounds.push(parsed.coords); }
+          layer.bindPopup(`<b class="font-mono">${r.kode_ruas}</b><br>${r.nama_ruas}<br>${popupInfo} · ${fmtNum(r.panjang_km,1)} km`);
+          layer.on('click', ()=>{ state.selectedRuasId = r.id; state.route='ruas'; renderShell(); });
+          layer.addTo(layerGroup);
+          drawn++;
+        }catch(e){
+          skippedRuas.push(r.kode_ruas || r.id);
+          console.warn('Peta: lewati ruas bermasalah ->', r.kode_ruas || r.id, e);
         }
-        let layer;
-        if(parsed.type === 'LineString'){ layer = L.polyline(parsed.coords, {color, weight:5, opacity:.85}); parsed.coords.forEach(c=>bounds.push(c)); }
-        else { layer = L.circleMarker(parsed.coords, {radius:7, color, fillColor:color, fillOpacity:.9}); bounds.push(parsed.coords); }
-        layer.bindPopup(`<b class="font-mono">${r.kode_ruas}</b><br>${r.nama_ruas}<br>${popupInfo} · ${fmtNum(r.panjang_km,1)} km`);
-        layer.on('click', ()=>{ state.selectedRuasId = r.id; state.route='ruas'; renderShell(); });
-        layer.addTo(layerGroup);
-        drawn++;
       });
+      if(skippedRuas.length){
+        console.warn(`Peta: ${skippedRuas.length} ruas dilewati karena data geometri bermasalah:`, skippedRuas);
+      }
       if(drawn > 0 && bounds.length){
         try{ map.fitBounds(bounds, {padding:[30,30]}); }
         catch(e){ console.warn('fitBounds gagal, pakai tampilan default NTT.', e); map.setView([-9.6, 121.0], 8); }
@@ -1098,7 +1107,9 @@ async function viewPeta(){
       else { document.getElementById('map-empty').classList.remove('hidden'); }
     }
 
-    draw();
+    function drawSafe(){ try{ draw(); }catch(e){ console.error('Peta: draw() gagal total ->', e); } }
+
+    drawSafe();
 
     document.getElementById('peta-mode-toggle').addEventListener('click', (e)=>{
       const btn = e.target.closest('button[data-mode]');
@@ -1114,7 +1125,7 @@ async function viewPeta(){
         ? 'Sebaran ruas jalan, diwarnai berdasarkan kondisi terkini'
         : 'Sebaran ruas jalan, diwarnai berdasarkan skor prioritas penanganan (kondisi + LHR + bencana)';
       document.getElementById('peta-legend').innerHTML = mode==='kondisi' ? LEGEND_KONDISI : LEGEND_PRIORITAS;
-      draw();
+      drawSafe();
     });
   }catch(err){ v.insertAdjacentHTML('beforeend', errorPanel(err)); }
 }
