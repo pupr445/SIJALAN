@@ -405,6 +405,7 @@ const ICONS = {
   bridge:'<path d="M2 20h20M4 20v-6M8 20v-9M12 20v-11M16 20v-9M20 20v-6M2 11c4-4.5 16-4.5 20 0"/>',
   camera:'<path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/>',
   pin:'<path d="M12 21s-7-6.5-7-11.5A7 7 0 0 1 19 9.5C19 14.5 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.3"/>',
+  flag:'<path d="M5 3v18"/><path d="M5 4h11l-2.5 3.5L16 11H5"/>',
   image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M21 16l-5.5-5.5L4 21"/>',
 };
 function actionBtns({onEdit, onDelete, onDetail}={}){
@@ -752,9 +753,11 @@ async function viewRuas(){
           <td class="font-mono">${fmtNum(r.panjang_km,1)} km</td>
           <td class="font-mono">${r.lebar_jalan_m!=null? fmtNum(r.lebar_jalan_m,1)+' m' : '—'}</td>
           <td class="font-mono text-[11.5px]">
-            ${(r.lat_awal!=null && r.long_awal!=null)? `<div>A: <a href="https://www.google.com/maps?q=${r.lat_awal},${r.long_awal}" target="_blank" class="text-navy-700 underline" onclick="event.stopPropagation()">${fmtNum(r.lat_awal,6)}, ${fmtNum(r.long_awal,6)}</a></div>` : ''}
-            ${(r.lat_akhir!=null && r.long_akhir!=null)? `<div>B: <a href="https://www.google.com/maps?q=${r.lat_akhir},${r.long_akhir}" target="_blank" class="text-navy-700 underline" onclick="event.stopPropagation()">${fmtNum(r.lat_akhir,6)}, ${fmtNum(r.long_akhir,6)}</a></div>` : ''}
-            ${(r.lat_awal==null && r.lat_akhir==null)? '—' : ''}
+            <div class="flex items-center gap-2.5">
+              ${(r.lat_awal!=null && r.long_awal!=null)? `<a href="https://www.google.com/maps?q=${r.lat_awal},${r.long_awal}" target="_blank" title="Titik Awal: ${fmtNum(r.lat_awal,6)}, ${fmtNum(r.long_awal,6)}" class="text-emerald-600 hover:text-emerald-700" onclick="event.stopPropagation()">${icon('pin','w-4 h-4')}</a>` : ''}
+              ${(r.lat_akhir!=null && r.long_akhir!=null)? `<a href="https://www.google.com/maps?q=${r.lat_akhir},${r.long_akhir}" target="_blank" title="Titik Akhir: ${fmtNum(r.lat_akhir,6)}, ${fmtNum(r.long_akhir,6)}" class="text-rose-600 hover:text-rose-700" onclick="event.stopPropagation()">${icon('flag','w-4 h-4')}</a>` : ''}
+              ${(r.lat_awal==null && r.lat_akhir==null)? '<span class="text-ink-400">—</span>' : ''}
+            </div>
           </td>
           <td>${badge(worstByRuas[r.id])}</td>
           ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
