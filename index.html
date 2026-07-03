@@ -2293,12 +2293,12 @@ async function viewKegiatan(){
   const v = document.getElementById('view');
   v.innerHTML = `<div class="skel h-10 w-full mb-4"></div><div class="skel h-96 w-full"></div>`;
   try{
-    const [kegiatan, ruas] = await Promise.all([api.kegiatanList(), api.ruasList()]);
+    const [kegiatan, ruas, kabupaten] = await Promise.all([api.kegiatanList(), api.ruasList(), api.kabupaten()]);
     state.ruasCache = ruas;
     v.innerHTML = `
     <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
       <div><h1 class="font-display font-extrabold text-2xl text-ink-900">Kegiatan Penanganan</h1>
-      <p class="text-ink-500 text-[13.5px]">${kegiatan.length} kegiatan tercatat, terhubung langsung ke master ruas jalan</p></div>
+      <p class="text-ink-500 text-[13.5px]"><span id="kegiatan-count">${kegiatan.length}</span> kegiatan tercatat, terhubung langsung ke master ruas jalan</p></div>
       <div class="flex items-center gap-2 flex-wrap">
         <div id="kegiatan-export"></div>
         ${isEditor()?`<button id="btn-add-kegiatan" class="btn-accent">+ Tambah Kegiatan Penanganan</button>`:''}
@@ -2306,8 +2306,15 @@ async function viewKegiatan(){
     </div>
     <div class="flex flex-wrap gap-3 mb-4">
       <input id="fk-search" placeholder="Cari ruas / sub kegiatan…" class="max-w-xs">
+      <select id="fk-kabupaten" class="max-w-[200px]"><option value="">Semua Kabupaten/Kota</option>${kabupaten.map(k=>`<option value="${k.id}">${k.nama}</option>`).join('')}</select>
       <select id="fk-jenis" class="max-w-[200px]"><option value="">Semua Jenis</option>${JENIS_PENANGANAN_OPT.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
       <select id="fk-status" class="max-w-[180px]"><option value="">Semua Status</option>${STATUS_PEKERJAAN_OPT.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
+      <select id="fk-sumber" class="max-w-[190px]"><option value="">Semua Sumber Dana</option>${SUMBER_DANA_OPT.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
+      <div class="flex items-center gap-1.5 text-[12.5px] text-ink-500">
+        <span>Mulai</span><input id="fk-tgl-dari" type="date" class="max-w-[150px]">
+        <span>s/d</span><input id="fk-tgl-sampai" type="date" class="max-w-[150px]">
+      </div>
+      <button id="fk-reset" class="btn-ghost !py-1.5 !px-3 text-[12.5px]">Reset Filter</button>
     </div>
     <div class="card overflow-x-auto">
       <table><thead><tr><th>Foto</th><th>Ruas</th><th>Jenis</th><th>Sub Kegiatan</th><th>Tgl. Mulai</th><th>Tgl. Selesai</th><th>Biaya</th><th>Status</th><th>Link Dokumentasi</th>${isEditor()?'<th>Aksi</th>':''}</tr></thead>
@@ -2317,14 +2324,23 @@ async function viewKegiatan(){
 
     function renderRows(){
       const q = document.getElementById('fk-search').value.toLowerCase();
+      const kab = document.getElementById('fk-kabupaten').value;
       const jenis = document.getElementById('fk-jenis').value;
       const status = document.getElementById('fk-status').value;
+      const sumber = document.getElementById('fk-sumber').value;
+      const tglDari = document.getElementById('fk-tgl-dari').value;
+      const tglSampai = document.getElementById('fk-tgl-sampai').value;
       const rows = kegiatan.filter(k=>{
         if(q && !((k.nama_ruas||'').toLowerCase().includes(q) || (k.kode_ruas||'').toLowerCase().includes(q) || (k.sub_kegiatan||'').toLowerCase().includes(q))) return false;
+        if(kab && k.kabupaten_id!==kab) return false;
         if(jenis && k.jenis_penanganan!==jenis) return false;
         if(status && k.status_pekerjaan!==status) return false;
+        if(sumber && k.sumber_dana!==sumber) return false;
+        if(tglDari && (!k.tanggal_penanganan || k.tanggal_penanganan < tglDari)) return false;
+        if(tglSampai && (!k.tanggal_penanganan || k.tanggal_penanganan > tglSampai)) return false;
         return true;
       });
+      document.getElementById('kegiatan-count').textContent = rows.length;
       const tbody = document.getElementById('kegiatan-tbody');
       tbody.innerHTML = rows.map(k=>`
         <tr class="row-hover" data-id="${k.id}">
@@ -2356,7 +2372,11 @@ async function viewKegiatan(){
         });
       });
     }
-    ['fk-search','fk-jenis','fk-status'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    ['fk-search','fk-kabupaten','fk-jenis','fk-status','fk-sumber','fk-tgl-dari','fk-tgl-sampai'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    document.getElementById('fk-reset').addEventListener('click', ()=>{
+      ['fk-search','fk-kabupaten','fk-jenis','fk-status','fk-sumber','fk-tgl-dari','fk-tgl-sampai'].forEach(id=>document.getElementById(id).value='');
+      renderRows();
+    });
     renderRows();
     if(isEditor()){ document.getElementById('btn-add-kegiatan').addEventListener('click', ()=>openKegiatanFormModal(ruas, null, null, ()=>viewKegiatan())); }
     document.getElementById('kegiatan-export').innerHTML = exportButtons();
@@ -2478,7 +2498,8 @@ async function viewAnggaran(){
   const v = document.getElementById('view');
   v.innerHTML = `<div class="skel h-72 w-full mb-5"></div><div class="skel h-96 w-full"></div>`;
   try{
-    const rekap = await api.rekapAnggaran();
+    const [rekap, rekapKab, kabupaten] = await Promise.all([api.rekapAnggaran(), api.rekapAnggaranKabupaten(), api.kabupaten()]);
+    const tahunOpt = [...new Set([...rekap.map(r=>r.tahun), ...rekapKab.map(r=>r.tahun)])].sort((a,b)=>b-a);
     v.innerHTML = `
     <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
       <div><h1 class="font-display font-extrabold text-2xl text-ink-900">Anggaran &amp; Realisasi</h1>
@@ -2486,15 +2507,57 @@ async function viewAnggaran(){
       <div id="anggaran-export"></div>
     </div>
     <div class="card p-5 mb-5"><div style="height:300px"><canvas id="chart-angg-detail"></canvas></div></div>
-    <div class="card overflow-x-auto">
+    <div class="flex flex-wrap gap-3 mb-4">
+      <select id="fa-tahun" class="max-w-[140px]"><option value="">Semua Tahun</option>${tahunOpt.map(t=>`<option value="${t}">${t}</option>`).join('')}</select>
+      <select id="fa-sumber" class="max-w-[190px]"><option value="">Semua Sumber Dana</option>${SUMBER_DANA_OPT.map(([vv,l])=>`<option value="${vv}">${l}</option>`).join('')}</select>
+    </div>
+    <div class="card overflow-x-auto mb-5">
       <table><thead><tr><th>Tahun</th><th>Sumber Dana</th><th>Pagu</th><th>Realisasi</th><th>% Realisasi</th></tr></thead>
-      <tbody>${rekap.length? rekap.map(r=>`
+      <tbody id="anggaran-tbody"></tbody></table>
+    </div>
+    <div class="flex items-center justify-between flex-wrap gap-3 mb-3">
+      <div><h2 class="font-display font-bold text-lg text-ink-900">Rekap per Kabupaten/Kota</h2>
+      <p class="text-ink-500 text-[13px]">Pagu dan realisasi anggaran per wilayah, mengikuti filter Tahun di atas</p></div>
+      <select id="fa-kab" class="max-w-[220px]"><option value="">Semua Kabupaten/Kota</option>${kabupaten.map(k=>`<option value="${k.id}">${k.nama}</option>`).join('')}</select>
+    </div>
+    <div class="card overflow-x-auto">
+      <table><thead><tr><th>Kabupaten/Kota</th><th>Tahun</th><th>Pagu</th><th>Realisasi</th><th>% Realisasi</th></tr></thead>
+      <tbody id="anggaran-kab-tbody"></tbody></table>
+    </div>
+    <div id="anggaran-kab-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada data yang cocok dengan filter.</div>`;
+
+    function renderTahunRows(){
+      const tahun = document.getElementById('fa-tahun').value;
+      const sumber = document.getElementById('fa-sumber').value;
+      const rows = rekap.filter(r=>{
+        if(tahun && String(r.tahun)!==tahun) return false;
+        if(sumber && r.sumber_dana!==sumber) return false;
+        return true;
+      });
+      document.getElementById('anggaran-tbody').innerHTML = rows.length? rows.map(r=>`
         <tr><td class="font-mono font-semibold">${r.tahun}</td><td>${(r.sumber_dana||'—').replaceAll('_',' ')}</td>
         <td class="font-mono">${fmtRp(r.total_pagu)}</td><td class="font-mono">${fmtRp(r.total_realisasi)}</td>
         <td><div class="flex items-center gap-2"><div class="w-24 h-1.5 bg-line rounded-full overflow-hidden"><div class="h-full bg-navy-700" style="width:${Math.min(r.persen_realisasi||0,100)}%"></div></div><span class="font-mono text-[12.5px]">${fmtNum(r.persen_realisasi,1)}%</span></div></td></tr>`).join('')
-        : `<tr><td colspan="5" class="text-center text-ink-400 py-8">Belum ada data anggaran tahunan.</td></tr>`}
-      </tbody></table>
-    </div>`;
+        : `<tr><td colspan="5" class="text-center text-ink-400 py-8">Tidak ada data anggaran yang cocok dengan filter.</td></tr>`;
+    }
+    function renderKabRows(){
+      const tahun = document.getElementById('fa-tahun').value;
+      const kab = document.getElementById('fa-kab').value;
+      const rows = rekapKab.filter(r=>{
+        if(tahun && String(r.tahun)!==tahun) return false;
+        if(kab && r.kabupaten_id!==kab) return false;
+        return true;
+      });
+      document.getElementById('anggaran-kab-tbody').innerHTML = rows.map(r=>`
+        <tr><td class="font-medium">${r.kabupaten}</td><td class="font-mono">${r.tahun}</td>
+        <td class="font-mono">${fmtRp(r.total_pagu)}</td><td class="font-mono">${fmtRp(r.total_realisasi)}</td>
+        <td><div class="flex items-center gap-2"><div class="w-24 h-1.5 bg-line rounded-full overflow-hidden"><div class="h-full bg-navy-700" style="width:${Math.min(r.persen_realisasi||0,100)}%"></div></div><span class="font-mono text-[12.5px]">${fmtNum(r.persen_realisasi,1)}%</span></div></td></tr>`).join('');
+      document.getElementById('anggaran-kab-empty').classList.toggle('hidden', rows.length>0);
+    }
+    ['fa-tahun','fa-sumber'].forEach(id=>document.getElementById(id).addEventListener('input', renderTahunRows));
+    ['fa-tahun','fa-kab'].forEach(id=>document.getElementById(id).addEventListener('input', renderKabRows));
+    renderTahunRows(); renderKabRows();
+
     document.getElementById('anggaran-export').innerHTML = exportButtons();
     wireExportButtons(document.getElementById('anggaran-export'),
       ()=>exportExcel(rekap.map(r=>({ 'Tahun': r.tahun, 'Sumber Dana': r.sumber_dana||'', 'Pagu': r.total_pagu||0, 'Realisasi': r.total_realisasi||0, '% Realisasi': r.persen_realisasi||0 })), 'sijalan_anggaran', 'Anggaran'),
@@ -2723,10 +2786,28 @@ async function renderJembatanTab(){
     const [data, ruas] = await Promise.all([api.jembatanList(), api.ruasList()]);
     state.ruasCache = ruas;
     box.innerHTML = `
-    <div class="flex justify-end mb-3">${isEditor()?`<button id="btn-add-jembatan" class="btn-accent">+ Tambah Jembatan</button>`:''}</div>
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+      <div class="flex flex-wrap gap-3">
+        <input id="fj-search" placeholder="Cari nama jembatan / ruas…" class="max-w-xs">
+        <select id="fj-kondisi" class="max-w-[180px]"><option value="">Semua Kondisi</option>${KONDISI_ORDER.map(k=>`<option value="${k}">${KONDISI_LABEL[k]}</option>`).join('')}</select>
+      </div>
+      ${isEditor()?`<button id="btn-add-jembatan" class="btn-accent">+ Tambah Jembatan</button>`:''}
+    </div>
     <div class="card overflow-x-auto">
       <table><thead><tr><th>Nama Jembatan</th><th>Ruas</th><th>STA Awal</th><th>STA Akhir</th><th>Panjang (m)</th><th>Lebar (m)</th><th>Konstruksi</th><th>Kondisi</th><th>Tahun</th>${isEditor()?'<th></th>':''}</tr></thead>
-      <tbody>${data.length? data.map(j=>`
+      <tbody id="jembatan-tbody"></tbody></table>
+    </div>
+    <div id="jembatan-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada data yang cocok dengan filter.</div>`;
+
+    function renderRows(){
+      const q = document.getElementById('fj-search').value.toLowerCase();
+      const kd = document.getElementById('fj-kondisi').value;
+      const rows = data.filter(j=>{
+        if(q && !((j.nama_jembatan||'').toLowerCase().includes(q) || (j.ruas_jalan?.nama_ruas||'').toLowerCase().includes(q) || (j.ruas_jalan?.kode_ruas||'').toLowerCase().includes(q))) return false;
+        if(kd && j.kondisi!==kd) return false;
+        return true;
+      });
+      document.getElementById('jembatan-tbody').innerHTML = rows.map(j=>`
         <tr data-id="${j.id}">
           <td class="font-medium">${j.nama_jembatan}</td>
           <td>${j.ruas_jalan?`${j.ruas_jalan.kode_ruas} — ${j.ruas_jalan.nama_ruas}`:'—'}</td>
@@ -2738,12 +2819,11 @@ async function renderJembatanTab(){
           <td>${badge(j.kondisi)}</td>
           <td class="font-mono">${j.tahun_dibangun||'—'}</td>
           ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
-        </tr>`).join('') : `<tr><td colspan="10" class="text-center text-ink-400 py-8">Belum ada data jembatan.</td></tr>`}
-      </tbody></table>
-    </div>`;
-    if(isEditor()){
-      document.getElementById('btn-add-jembatan').addEventListener('click', ()=>openJembatanFormModal(ruas, null, renderJembatanTab));
-      box.querySelectorAll('tr[data-id]').forEach(tr=>{
+        </tr>`).join('');
+      document.getElementById('jembatan-empty').classList.toggle('hidden', rows.length>0 || data.length===0);
+      const tbody = document.getElementById('jembatan-tbody');
+      if(data.length===0) tbody.innerHTML = `<tr><td colspan="10" class="text-center text-ink-400 py-8">Belum ada data jembatan.</td></tr>`;
+      tbody.querySelectorAll('tr[data-id]').forEach(tr=>{
         const j = data.find(x=>x.id===tr.dataset.id);
         tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openJembatanFormModal(ruas, j, renderJembatanTab));
         tr.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
@@ -2752,6 +2832,9 @@ async function renderJembatanTab(){
         });
       });
     }
+    ['fj-search','fj-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    renderRows();
+    if(isEditor()){ document.getElementById('btn-add-jembatan').addEventListener('click', ()=>openJembatanFormModal(ruas, null, renderJembatanTab)); }
   }catch(err){ box.innerHTML = errorPanel(err); }
 }
 function openJembatanFormModal(ruasList, editData=null, onSaved=null){
@@ -2814,11 +2897,34 @@ async function renderDrainaseTab(){
   try{
     const [data, ruas] = await Promise.all([api.drainaseList(), api.ruasList()]);
     state.ruasCache = ruas;
+    const jenisOpt = [...new Set(data.map(d=>d.jenis).filter(Boolean))].sort();
     box.innerHTML = `
-    <div class="flex justify-end mb-3">${isEditor()?`<button id="btn-add-drainase" class="btn-accent">+ Tambah Drainase</button>`:''}</div>
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+      <div class="flex flex-wrap gap-3">
+        <input id="fd-search" placeholder="Cari ruas / segmen…" class="max-w-xs">
+        <select id="fd-jenis" class="max-w-[190px]"><option value="">Semua Jenis</option>${jenisOpt.map(j=>`<option value="${j}">${j.replaceAll('_',' ')}</option>`).join('')}</select>
+        <select id="fd-kondisi" class="max-w-[180px]"><option value="">Semua Kondisi</option>${KONDISI_ORDER.map(k=>`<option value="${k}">${KONDISI_LABEL[k]}</option>`).join('')}</select>
+      </div>
+      ${isEditor()?`<button id="btn-add-drainase" class="btn-accent">+ Tambah Drainase</button>`:''}
+    </div>
     <div class="card overflow-x-auto">
       <table><thead><tr><th>Ruas</th><th>Segmen</th><th>Jenis</th><th>Sisi</th><th>STA Awal</th><th>STA Akhir</th><th>Panjang (m)</th><th>Kondisi</th>${isEditor()?'<th></th>':''}</tr></thead>
-      <tbody>${data.length? data.map(d=>`
+      <tbody id="drainase-tbody"></tbody></table>
+    </div>
+    <div id="drainase-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada data yang cocok dengan filter.</div>`;
+
+    function renderRows(){
+      const q = document.getElementById('fd-search').value.toLowerCase();
+      const jenis = document.getElementById('fd-jenis').value;
+      const kd = document.getElementById('fd-kondisi').value;
+      const rows = data.filter(d=>{
+        const namaRuas = d.segmen_jalan?.ruas_jalan?.nama_ruas||''; const kodeRuas = d.segmen_jalan?.ruas_jalan?.kode_ruas||''; const kodeSeg = d.segmen_jalan?.kode_segmen||'';
+        if(q && !(namaRuas.toLowerCase().includes(q) || kodeRuas.toLowerCase().includes(q) || kodeSeg.toLowerCase().includes(q))) return false;
+        if(jenis && d.jenis!==jenis) return false;
+        if(kd && d.kondisi!==kd) return false;
+        return true;
+      });
+      document.getElementById('drainase-tbody').innerHTML = rows.map(d=>`
         <tr data-id="${d.id}">
           <td>${d.segmen_jalan?.ruas_jalan? `${d.segmen_jalan.ruas_jalan.kode_ruas} — ${d.segmen_jalan.ruas_jalan.nama_ruas}`:'—'}</td>
           <td class="font-mono text-[12.5px]">${d.segmen_jalan?.kode_segmen||'—'}</td>
@@ -2829,12 +2935,11 @@ async function renderDrainaseTab(){
           <td class="font-mono">${fmtNum(d.panjang_m,1)}</td>
           <td>${badge(d.kondisi)}</td>
           ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
-        </tr>`).join('') : `<tr><td colspan="9" class="text-center text-ink-400 py-8">Belum ada data drainase.</td></tr>`}
-      </tbody></table>
-    </div>`;
-    if(isEditor()){
-      document.getElementById('btn-add-drainase').addEventListener('click', ()=>openDrainaseFormModal(ruas, null, renderDrainaseTab));
-      box.querySelectorAll('tr[data-id]').forEach(tr=>{
+        </tr>`).join('');
+      document.getElementById('drainase-empty').classList.toggle('hidden', rows.length>0 || data.length===0);
+      const tbody = document.getElementById('drainase-tbody');
+      if(data.length===0) tbody.innerHTML = `<tr><td colspan="9" class="text-center text-ink-400 py-8">Belum ada data drainase.</td></tr>`;
+      tbody.querySelectorAll('tr[data-id]').forEach(tr=>{
         const d = data.find(x=>x.id===tr.dataset.id);
         tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openDrainaseFormModal(ruas, d, renderDrainaseTab));
         tr.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
@@ -2843,6 +2948,9 @@ async function renderDrainaseTab(){
         });
       });
     }
+    ['fd-search','fd-jenis','fd-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    renderRows();
+    if(isEditor()){ document.getElementById('btn-add-drainase').addEventListener('click', ()=>openDrainaseFormModal(ruas, null, renderDrainaseTab)); }
   }catch(err){ box.innerHTML = errorPanel(err); }
 }
 function openDrainaseFormModal(ruasList, editData=null, onSaved=null){
@@ -2921,11 +3029,34 @@ async function renderPerlengkapanTab(){
   try{
     const [data, ruas] = await Promise.all([api.perlengkapanList(), api.ruasList()]);
     state.ruasCache = ruas;
+    const jenisOpt = [...new Set(data.map(p=>p.jenis).filter(Boolean))].sort();
     box.innerHTML = `
-    <div class="flex justify-end mb-3">${isEditor()?`<button id="btn-add-perlengkapan" class="btn-accent">+ Tambah Perlengkapan</button>`:''}</div>
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+      <div class="flex flex-wrap gap-3">
+        <input id="fp-search" placeholder="Cari ruas / segmen…" class="max-w-xs">
+        <select id="fp-jenis" class="max-w-[190px]"><option value="">Semua Jenis</option>${jenisOpt.map(j=>`<option value="${j}">${j.replaceAll('_',' ')}</option>`).join('')}</select>
+        <select id="fp-kondisi" class="max-w-[180px]"><option value="">Semua Kondisi</option>${KONDISI_ORDER.map(k=>`<option value="${k}">${KONDISI_LABEL[k]}</option>`).join('')}</select>
+      </div>
+      ${isEditor()?`<button id="btn-add-perlengkapan" class="btn-accent">+ Tambah Perlengkapan</button>`:''}
+    </div>
     <div class="card overflow-x-auto">
       <table><thead><tr><th>Ruas</th><th>Segmen</th><th>Jenis</th><th>STA Awal</th><th>STA Akhir</th><th>Jumlah</th><th>Kondisi</th>${isEditor()?'<th></th>':''}</tr></thead>
-      <tbody>${data.length? data.map(p=>`
+      <tbody id="perlengkapan-tbody"></tbody></table>
+    </div>
+    <div id="perlengkapan-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada data yang cocok dengan filter.</div>`;
+
+    function renderRows(){
+      const q = document.getElementById('fp-search').value.toLowerCase();
+      const jenis = document.getElementById('fp-jenis').value;
+      const kd = document.getElementById('fp-kondisi').value;
+      const rows = data.filter(p=>{
+        const namaRuas = p.segmen_jalan?.ruas_jalan?.nama_ruas||''; const kodeRuas = p.segmen_jalan?.ruas_jalan?.kode_ruas||''; const kodeSeg = p.segmen_jalan?.kode_segmen||'';
+        if(q && !(namaRuas.toLowerCase().includes(q) || kodeRuas.toLowerCase().includes(q) || kodeSeg.toLowerCase().includes(q))) return false;
+        if(jenis && p.jenis!==jenis) return false;
+        if(kd && p.kondisi!==kd) return false;
+        return true;
+      });
+      document.getElementById('perlengkapan-tbody').innerHTML = rows.map(p=>`
         <tr data-id="${p.id}">
           <td>${p.segmen_jalan?.ruas_jalan? `${p.segmen_jalan.ruas_jalan.kode_ruas} — ${p.segmen_jalan.ruas_jalan.nama_ruas}`:'—'}</td>
           <td class="font-mono text-[12.5px]">${p.segmen_jalan?.kode_segmen||'—'}</td>
@@ -2935,12 +3066,11 @@ async function renderPerlengkapanTab(){
           <td class="font-mono">${p.jumlah??'—'}</td>
           <td>${badge(p.kondisi)}</td>
           ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
-        </tr>`).join('') : `<tr><td colspan="8" class="text-center text-ink-400 py-8">Belum ada data perlengkapan jalan.</td></tr>`}
-      </tbody></table>
-    </div>`;
-    if(isEditor()){
-      document.getElementById('btn-add-perlengkapan').addEventListener('click', ()=>openPerlengkapanFormModal(ruas, null, renderPerlengkapanTab));
-      box.querySelectorAll('tr[data-id]').forEach(tr=>{
+        </tr>`).join('');
+      document.getElementById('perlengkapan-empty').classList.toggle('hidden', rows.length>0 || data.length===0);
+      const tbody = document.getElementById('perlengkapan-tbody');
+      if(data.length===0) tbody.innerHTML = `<tr><td colspan="8" class="text-center text-ink-400 py-8">Belum ada data perlengkapan jalan.</td></tr>`;
+      tbody.querySelectorAll('tr[data-id]').forEach(tr=>{
         const p = data.find(x=>x.id===tr.dataset.id);
         tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openPerlengkapanFormModal(ruas, p, renderPerlengkapanTab));
         tr.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
@@ -2949,6 +3079,9 @@ async function renderPerlengkapanTab(){
         });
       });
     }
+    ['fp-search','fp-jenis','fp-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    renderRows();
+    if(isEditor()){ document.getElementById('btn-add-perlengkapan').addEventListener('click', ()=>openPerlengkapanFormModal(ruas, null, renderPerlengkapanTab)); }
   }catch(err){ box.innerHTML = errorPanel(err); }
 }
 function openPerlengkapanFormModal(ruasList, editData=null, onSaved=null){
@@ -3022,14 +3155,34 @@ async function renderLalulintasTab(){
   try{
     const [data, ruas] = await Promise.all([api.lalulintasList(), api.ruasList()]);
     state.ruasCache = ruas;
+    const tahunOpt = [...new Set(data.map(l=>l.tahun).filter(t=>t!=null))].sort((a,b)=>b-a);
     box.innerHTML = `
-    <div class="flex justify-end gap-2 mb-3">
-      <div id="lalin-export"></div>
-      ${isEditor()?`<button id="btn-add-lalin" class="btn-accent">+ Tambah Data Lalu Lintas</button>`:''}
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+      <div class="flex flex-wrap gap-3">
+        <input id="fl-search" placeholder="Cari ruas / segmen…" class="max-w-xs">
+        <select id="fl-tahun" class="max-w-[140px]"><option value="">Semua Tahun</option>${tahunOpt.map(t=>`<option value="${t}">${t}</option>`).join('')}</select>
+      </div>
+      <div class="flex items-center gap-2">
+        <div id="lalin-export"></div>
+        ${isEditor()?`<button id="btn-add-lalin" class="btn-accent">+ Tambah Data Lalu Lintas</button>`:''}
+      </div>
     </div>
     <div class="card overflow-x-auto">
       <table><thead><tr><th>Ruas</th><th>Segmen</th><th>Tahun</th><th>LHR (smp/hari)</th><th>Kend. Ringan</th><th>Kend. Berat</th><th>Sepeda Motor</th><th>Sumber</th>${isEditor()?'<th></th>':''}</tr></thead>
-      <tbody>${data.length? data.map(l=>`
+      <tbody id="lalin-tbody"></tbody></table>
+    </div>
+    <div id="lalin-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada data yang cocok dengan filter.</div>`;
+
+    function renderRows(){
+      const q = document.getElementById('fl-search').value.toLowerCase();
+      const th = document.getElementById('fl-tahun').value;
+      const rows = data.filter(l=>{
+        const namaRuas = l.segmen_jalan?.ruas_jalan?.nama_ruas||''; const kodeRuas = l.segmen_jalan?.ruas_jalan?.kode_ruas||''; const kodeSeg = l.segmen_jalan?.kode_segmen||'';
+        if(q && !(namaRuas.toLowerCase().includes(q) || kodeRuas.toLowerCase().includes(q) || kodeSeg.toLowerCase().includes(q))) return false;
+        if(th && String(l.tahun)!==th) return false;
+        return true;
+      });
+      document.getElementById('lalin-tbody').innerHTML = rows.map(l=>`
         <tr data-id="${l.id}">
           <td>${l.segmen_jalan?.ruas_jalan? `${l.segmen_jalan.ruas_jalan.kode_ruas} — ${l.segmen_jalan.ruas_jalan.nama_ruas}`:'—'}</td>
           <td class="font-mono text-[12.5px]">${l.segmen_jalan?.kode_segmen||'—'}</td>
@@ -3040,9 +3193,22 @@ async function renderLalulintasTab(){
           <td class="font-mono">${fmtNum(l.sepeda_motor,1)}</td>
           <td class="text-ink-500 text-[12.5px]">${l.sumber_data||'—'}</td>
           ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
-        </tr>`).join('') : `<tr><td colspan="9" class="text-center text-ink-400 py-8">Belum ada data lalu lintas.</td></tr>`}
-      </tbody></table>
-    </div>`;
+        </tr>`).join('');
+      document.getElementById('lalin-empty').classList.toggle('hidden', rows.length>0 || data.length===0);
+      const tbody = document.getElementById('lalin-tbody');
+      if(data.length===0) tbody.innerHTML = `<tr><td colspan="9" class="text-center text-ink-400 py-8">Belum ada data lalu lintas.</td></tr>`;
+      tbody.querySelectorAll('tr[data-id]').forEach(tr=>{
+        const l = data.find(x=>x.id===tr.dataset.id);
+        tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openLalulintasFormModal(ruas, l, renderLalulintasTab));
+        tr.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
+          if(!(await confirmDelete('Hapus data lalu lintas ini?'))) return;
+          try{ await api.deleteLalulintas(l.id); renderLalulintasTab(); }catch(err){ alert('Gagal menghapus: '+err.message); }
+        });
+      });
+    }
+    ['fl-search','fl-tahun'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    renderRows();
+
     document.getElementById('lalin-export').innerHTML = exportButtons();
     wireExportButtons(document.getElementById('lalin-export'),
       ()=>exportExcel(data.map(l=>({
@@ -3054,14 +3220,6 @@ async function renderLalulintasTab(){
       ], data.map(l=>({...l, kode_segmen_flat: l.segmen_jalan?.kode_segmen||'—'})), 'sijalan_lalu_lintas'));
     if(isEditor()){
       document.getElementById('btn-add-lalin').addEventListener('click', ()=>openLalulintasFormModal(ruas, null, renderLalulintasTab));
-      box.querySelectorAll('tr[data-id]').forEach(tr=>{
-        const l = data.find(x=>x.id===tr.dataset.id);
-        tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openLalulintasFormModal(ruas, l, renderLalulintasTab));
-        tr.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
-          if(!(await confirmDelete('Hapus data lalu lintas ini?'))) return;
-          try{ await api.deleteLalulintas(l.id); renderLalulintasTab(); }catch(err){ alert('Gagal menghapus: '+err.message); }
-        });
-      });
     }
   }catch(err){ box.innerHTML = errorPanel(err); }
 }
