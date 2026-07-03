@@ -342,8 +342,9 @@ function ambilKoordinatSingkat(timeoutMs = 3500){
   });
 }
 
-async function uploadFotoKegiatan(file, ruasId, label, folder='penanganan'){
+async function uploadFotoKegiatan(file, ruasId, label, folder='penanganan', onStage=null){
   if(!file) return null;
+  onStage?.('compress');
   let watermarkLines = null;
   if(file.type && file.type.startsWith('image/') && file.type !== 'image/gif'){
     try{
@@ -358,12 +359,62 @@ async function uploadFotoKegiatan(file, ruasId, label, folder='penanganan'){
     }catch(e){ watermarkLines = null; }
   }
   const fileFinal = await kompresGambar(file, watermarkLines ? { watermarkLines } : {});
+  onStage?.('upload');
   const ext = (fileFinal.name.split('.').pop()||'jpg').toLowerCase().replace(/[^a-z0-9]/g,'') || 'jpg';
   const path = `${folder}/${ruasId||'umum'}/${Date.now()}_${label}.${ext}`;
   const contentType = fileFinal.type && fileFinal.type.startsWith('image/') ? fileFinal.type : (ext==='png'?'image/png':ext==='webp'?'image/webp':ext==='gif'?'image/gif':'image/jpeg');
   const {error} = await sb.storage.from(FOTO_BUCKET).upload(path, fileFinal, {upsert:false, cacheControl:'3600', contentType});
   if(error) throw error;
   return path;
+}
+// --- PROGRES UNGGAH FOTO (UI) -----------------------------------------
+// Mengunggah sekumpulan foto secara berurutan (bukan paralel) supaya progres
+// per-foto bisa ditampilkan nyata ke user: tahap kompresi lalu tahap unggah,
+// untuk setiap foto, sampai semuanya selesai. Tidak mengubah logika inti
+// kompresi/unggah (kompresGambar & uploadFotoKegiatan tetap sama).
+async function uploadFotoBanyakDenganProgres(items, folder, onProgress){
+  // items: [{ruasId, file, label}]
+  const total = items.length;
+  const hasil = [];
+  for(let i=0;i<total;i++){
+    const {ruasId, file, label} = items[i];
+    const path = await uploadFotoKegiatan(file, ruasId, label, folder, (stage)=>{ onProgress?.({index:i, total, stage}); });
+    hasil.push(path);
+    onProgress?.({index:i, total, stage:'done'});
+  }
+  return hasil;
+}
+function progresUploadHtml(id){
+  return `<div id="${id}" class="hidden mt-2.5">
+    <div class="flex items-center justify-between text-[11.5px] text-ink-500 mb-1">
+      <span data-progres-label>Mengunggah…</span>
+      <span data-progres-persen class="font-mono">0%</span>
+    </div>
+    <div class="w-full h-1.5 rounded-full bg-ink-100 overflow-hidden">
+      <div data-progres-bar class="h-full rounded-full bg-navy-700 transition-all duration-300 ease-out" style="width:0%"></div>
+    </div>
+  </div>`;
+}
+function setProgresUpload(root, id, {index, total, stage}){
+  const box = root.querySelector('#'+id);
+  if(!box || !total) return;
+  box.classList.remove('hidden');
+  const labelEl = box.querySelector('[data-progres-label]');
+  const persenEl = box.querySelector('[data-progres-persen]');
+  const barEl = box.querySelector('[data-progres-bar]');
+  const stageFrac = stage==='compress' ? 0.15 : stage==='upload' ? 0.55 : 1;
+  const persen = Math.round(Math.min(1, (index + stageFrac) / total) * 100);
+  barEl.style.width = persen+'%';
+  persenEl.textContent = persen+'%';
+  labelEl.textContent = stage==='compress'
+    ? `Mengompres foto ${index+1} dari ${total}…`
+    : stage==='upload'
+      ? `Mengunggah foto ${index+1} dari ${total}…`
+      : `Foto ${index+1} dari ${total} selesai`;
+}
+function hideProgresUpload(root, id){
+  const box = root.querySelector('#'+id);
+  if(box) box.classList.add('hidden');
 }
 async function signedFotoUrls(paths){
   const uniq = [...new Set((paths||[]).filter(Boolean))];
@@ -541,6 +592,7 @@ const api = {
   // --- kondisi / survei ---
   async kondisiTerkini(){ const {data,error} = await sb.from('v_kondisi_terkini').select('*'); if(error) throw error; return data; },
   async rekapKondisiKabupaten(){ const {data,error} = await sb.from('v_rekap_kondisi_kabupaten').select('*'); if(error) throw error; return data; },
+  async trenKondisiTahunan(){ const {data,error} = await sb.from('v_tren_kondisi_tahunan').select('*'); if(error) throw error; return data; },
   async skorPrioritas(limit=10){ const {data,error} = await sb.from('v_skor_prioritas').select('*').order('skor_prioritas',{ascending:false}).limit(limit); if(error) throw error; return data; },
   async skorPrioritasAll(){ const {data,error} = await sb.from('v_skor_prioritas').select('*'); if(error) throw error; return data; },
   async insertSurvei(payload){ const {error} = await sb.from('survei_kondisi').insert(payload); if(error) throw error; },
@@ -619,7 +671,18 @@ const api = {
   async deleteLalulintas(id){ const {error} = await sb.from('data_lalu_lintas').delete().eq('id',id); if(error) throw error; },
 
   // --- log aktivitas (audit) ---
-  async auditLog(limit=200){ const {data,error} = await sb.from('v_audit_log').select('*').limit(limit); if(error) throw error; return data; },
+  async auditLog(opts={}){
+    const {limit=300, tabel, aksi, actorNama, dari, sampai} = opts;
+    let q = sb.from('v_audit_log').select('*');
+    if(tabel) q = q.eq('tabel', tabel);
+    if(aksi) q = q.eq('aksi', aksi);
+    if(actorNama) q = q.ilike('actor_nama', `%${actorNama}%`);
+    if(dari) q = q.gte('created_at', dari);
+    if(sampai) q = q.lte('created_at', sampai+'T23:59:59.999');
+    q = q.order('created_at',{ascending:false}).limit(limit);
+    const {data,error} = await q;
+    if(error) throw error; return data;
+  },
 
   // --- penugasan survei (untuk widget notifikasi) ---
   async penugasanOverdue(){
@@ -980,8 +1043,8 @@ async function viewDashboard(){
     <div class="grid lg:grid-cols-2 gap-5"><div class="skel h-80"></div><div class="skel h-80"></div></div>
   </div>`;
   try{
-    const [ruas, kabupaten, rekapKondisi, rekapAnggaran, rekapAnggaranKab, skorPrioritas] = await Promise.all([
-      api.ruasList(), api.kabupaten(), api.rekapKondisiKabupaten(), api.rekapAnggaran(), api.rekapAnggaranKabupaten(), api.skorPrioritas(10).catch(()=>[])
+    const [ruas, kabupaten, rekapKondisi, rekapAnggaran, rekapAnggaranKab, skorPrioritas, trenKondisi] = await Promise.all([
+      api.ruasList(), api.kabupaten(), api.rekapKondisiKabupaten(), api.rekapAnggaran(), api.rekapAnggaranKabupaten(), api.skorPrioritas(10).catch(()=>[]), api.trenKondisiTahunan().catch(()=>[])
     ]);
     state.ruasCache = ruas; state.kabupatenList = kabupaten;
 
@@ -1038,6 +1101,14 @@ async function viewDashboard(){
 
     <div class="card p-5 mt-5">
       <div class="flex items-center justify-between mb-4">
+        <h3 class="font-display font-bold text-[15px]">Tren Kondisi Jalan Multi-Tahun</h3>
+        <span class="font-mono text-[11px] text-ink-400">% panjang ruas per tahun survei</span>
+      </div>
+      ${trenKondisi.length < 2 ? `<p class="text-[13px] text-ink-500">Tren baru bisa ditampilkan setelah ada data survei kondisi dari minimal 2 tahun berbeda.</p><div style="height:0"><canvas id="chart-tren-kondisi"></canvas></div>` : `<div style="height:300px"><canvas id="chart-tren-kondisi"></canvas></div>`}
+    </div>
+
+    <div class="card p-5 mt-5">
+      <div class="flex items-center justify-between mb-4">
         <h3 class="font-display font-bold text-[15px]">Realisasi Anggaran per Kabupaten/Kota (${thisYear})</h3>
         <span class="font-mono text-[11px] text-ink-400">% realisasi terhadap pagu</span>
       </div>
@@ -1083,6 +1154,23 @@ async function viewDashboard(){
     mkChart('chart-kondisi', 'bar', {labels:kabNames, datasets:dsKondisi}, {
       plugins:{legend:{display:false}}, scales:{x:{stacked:true, ticks:{font:{size:10}}}, y:{stacked:true, title:{display:true,text:'km'}}}
     });
+
+    // Chart: tren kondisi jalan multi-tahun (line, % panjang per kondisi per tahun)
+    if(trenKondisi.length >= 2){
+      const tahunTren = [...new Set(trenKondisi.map(r=>r.tahun))].sort();
+      const dsTren = KONDISI_ORDER.map(k=>({
+        label: KONDISI_LABEL[k], borderColor: KONDISI_COLOR[k], backgroundColor: KONDISI_COLOR[k],
+        tension: 0.3, fill:false,
+        data: tahunTren.map(t=>{
+          const totalTahun = trenKondisi.filter(r=>r.tahun===t).reduce((s,r)=>s+Number(r.total_panjang_km||0),0) || 1;
+          const row = trenKondisi.find(r=>r.tahun===t && r.kondisi===k);
+          return row ? Math.round(Number(row.total_panjang_km)/totalTahun*1000)/10 : 0;
+        })
+      }));
+      mkChart('chart-tren-kondisi', 'line', {labels:tahunTren, datasets:dsTren}, {
+        scales:{y:{min:0, max:100, ticks:{callback:v=>v+'%'}, title:{display:true,text:'% panjang ruas'}}}
+      });
+    }
 
     // Chart: anggaran per tahun (grouped bar pagu vs realisasi)
     const tahunList = [...new Set(rekapAnggaran.map(r=>r.tahun))].sort();
@@ -1678,6 +1766,7 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
         <div id="sv-foto-existing" class="flex flex-wrap gap-2 mb-1.5"></div>
         <div id="sv-foto-new" class="flex flex-wrap gap-2 mb-1.5"></div>
         <input id="sv-foto" type="file" accept="image/*" multiple class="!py-1.5 text-[12px] w-full">
+        ${progresUploadHtml('sv-progress')}
       </div>
       <div id="sv-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
       <button type="submit" class="btn-primary w-full" ${segmenList.length?'':'disabled'}>${isEdit?'Simpan Perubahan':'Simpan Survei'}</button>
@@ -1695,8 +1784,13 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
     const newFiles = fotoPicker.getNewFiles();
     submitBtn.disabled = true; const submitLabel = submitBtn.textContent;
     try{
-      if(newFiles.length){ submitBtn.textContent = `Mengompres & mengunggah ${newFiles.length} foto…`; }
-      const uploadedPaths = await Promise.all(newFiles.map(f=>uploadFotoKegiatan(f, ruas.id, 'kondisi', 'survei')));
+      let uploadedPaths = [];
+      if(newFiles.length){
+        submitBtn.textContent = `Mengunggah ${newFiles.length} foto…`;
+        const items = newFiles.map(f=>({ruasId: ruas.id, file:f, label:'kondisi'}));
+        uploadedPaths = await uploadFotoBanyakDenganProgres(items, 'survei', (p)=>setProgresUpload(overlay, 'sv-progress', p));
+        hideProgresUpload(overlay, 'sv-progress');
+      }
       const fotoPaths = [...fotoPicker.getKeptPaths(), ...uploadedPaths];
       submitBtn.textContent = submitLabel;
       const payload = {
@@ -1795,6 +1889,7 @@ function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=nul
           </div>
         </div>
       </div>
+      ${progresUploadHtml('kg-progress')}
       <div class="grid grid-cols-2 gap-3">
         <div><label class="text-[12.5px] font-semibold text-ink-600">Tanggal Mulai *</label><input id="kg-tgl-mulai" type="date" required value="${editData?.tanggal_penanganan||editData?.tanggal_mulai||''}"></div>
         <div><label class="text-[12.5px] font-semibold text-ink-600">Tanggal Selesai</label><input id="kg-tgl-selesai" type="date" value="${editData?.tanggal_selesai||''}"></div>
@@ -1882,11 +1977,17 @@ function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=nul
     const fileAkhir = overlay.querySelector('#kg-foto-akhir').files?.[0] || null;
     submitBtn.disabled = true; const submitLabel = submitBtn.textContent;
     try{
-      if(fileAwal || fileAkhir){ submitBtn.textContent = 'Mengompres & mengunggah foto…'; }
-      const [fotoAwalPath, fotoAkhirPath] = await Promise.all([
-        fileAwal? uploadFotoKegiatan(fileAwal, ruasId, 'awal') : Promise.resolve(editData?.foto_awal_path || null),
-        fileAkhir? uploadFotoKegiatan(fileAkhir, ruasId, 'akhir') : Promise.resolve(editData?.foto_akhir_path || null),
-      ]);
+      let fotoAwalPath = editData?.foto_awal_path || null;
+      let fotoAkhirPath = editData?.foto_akhir_path || null;
+      const fotoItems = [];
+      if(fileAwal) fotoItems.push({key:'awal', ruasId, file:fileAwal, label:'awal'});
+      if(fileAkhir) fotoItems.push({key:'akhir', ruasId, file:fileAkhir, label:'akhir'});
+      if(fotoItems.length){
+        submitBtn.textContent = `Mengunggah ${fotoItems.length} foto…`;
+        const uploaded = await uploadFotoBanyakDenganProgres(fotoItems, 'penanganan', (p)=>setProgresUpload(overlay, 'kg-progress', p));
+        fotoItems.forEach((it,i)=>{ if(it.key==='awal') fotoAwalPath = uploaded[i]; else fotoAkhirPath = uploaded[i]; });
+        hideProgresUpload(overlay, 'kg-progress');
+      }
       submitBtn.textContent = submitLabel;
       const payload = {
         ruas_id: ruasId,
@@ -3009,37 +3110,75 @@ function ringkasPerubahan(lama, baru){
   });
   return perubahan.length? perubahan.slice(0,4).join(' · ') + (perubahan.length>4?' …':'') : 'Tidak ada perubahan nilai.';
 }
+function debounce(fn, wait=350){
+  let t; return (...args)=>{ clearTimeout(t); t = setTimeout(()=>fn(...args), wait); };
+}
 async function viewLogAktivitas(){
   const v = document.getElementById('view');
   if(!isAdmin()){ v.innerHTML = `<div class="card p-8 text-center text-ink-400">Halaman ini khusus administrator.</div>`; return; }
-  v.innerHTML = `<div class="skel h-96 w-full"></div>`;
-  try{
-    const logs = await api.auditLog(300);
-    v.innerHTML = `
+  v.innerHTML = `<div class="skel h-10 w-full mb-4"></div><div class="skel h-96 w-full"></div>`;
+  const filter = {tabel:'', aksi:'', actorNama:'', dari:'', sampai:''};
+  v.innerHTML = `
     <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
       <div><h1 class="font-display font-extrabold text-2xl text-ink-900">Log Aktivitas</h1>
-      <p class="text-ink-500 text-[13.5px]">Jejak audit perubahan data Survei Kondisi, Anggaran, dan Kegiatan Penanganan (300 terbaru)</p></div>
+      <p id="audit-subtitle" class="text-ink-500 text-[13.5px]">Jejak audit perubahan data Survei Kondisi, Anggaran, dan Kegiatan Penanganan</p></div>
       <div id="audit-export"></div>
+    </div>
+    <div class="flex flex-wrap items-end gap-3 mb-4">
+      <div><label class="text-[11.5px] font-semibold text-ink-500 block mb-1">Cari nama petugas</label><input id="f-audit-nama" placeholder="Nama petugas…" class="max-w-[200px]"></div>
+      <div><label class="text-[11.5px] font-semibold text-ink-500 block mb-1">Tabel</label><select id="f-audit-tabel" class="max-w-[190px]"><option value="">Semua Tabel</option>${Object.entries(AUDIT_TABEL_LABEL).map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
+      <div><label class="text-[11.5px] font-semibold text-ink-500 block mb-1">Aksi</label><select id="f-audit-aksi" class="max-w-[150px]"><option value="">Semua Aksi</option>${Object.entries(AUDIT_AKSI_LABEL).map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
+      <div><label class="text-[11.5px] font-semibold text-ink-500 block mb-1">Dari Tanggal</label><input id="f-audit-dari" type="date" class="max-w-[160px]"></div>
+      <div><label class="text-[11.5px] font-semibold text-ink-500 block mb-1">Sampai Tanggal</label><input id="f-audit-sampai" type="date" class="max-w-[160px]"></div>
+      <button id="f-audit-reset" type="button" class="btn-ghost">Reset Filter</button>
     </div>
     <div class="card overflow-x-auto">
       <table><thead><tr><th>Waktu</th><th>Tabel</th><th>Aksi</th><th>Oleh</th><th>Ringkasan Perubahan</th></tr></thead>
-      <tbody>${logs.length? logs.map(l=>`
+      <tbody id="audit-tbody"><tr><td colspan="5" class="text-center text-ink-400 py-8">Memuat…</td></tr></tbody></table>
+    </div>`;
+
+  let currentLogs = [];
+  async function loadAndRender(){
+    const tbody = document.getElementById('audit-tbody');
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center text-ink-400 py-8">Memuat…</td></tr>`;
+    try{
+      const logs = await api.auditLog({limit:300, tabel:filter.tabel||undefined, aksi:filter.aksi||undefined, actorNama:filter.actorNama||undefined, dari:filter.dari||undefined, sampai:filter.sampai||undefined});
+      currentLogs = logs;
+      const adaFilter = filter.tabel||filter.aksi||filter.actorNama||filter.dari||filter.sampai;
+      document.getElementById('audit-subtitle').textContent = `${logs.length} entri ${adaFilter?'sesuai filter':'terbaru'}${logs.length>=300?' (dibatasi 300, persempit filter untuk hasil lebih spesifik)':''}`;
+      tbody.innerHTML = logs.length? logs.map(l=>`
         <tr>
           <td class="font-mono text-[12px] whitespace-nowrap">${new Date(l.created_at).toLocaleString('id-ID')}</td>
           <td>${AUDIT_TABEL_LABEL[l.tabel]||l.tabel}</td>
           <td><span class="badge ${l.aksi==='delete'?'badge-rusak_berat':l.aksi==='insert'?'badge-baik':'badge-sedang'}">${AUDIT_AKSI_LABEL[l.aksi]||l.aksi}</span></td>
           <td class="text-[12.5px]">${l.actor_nama||'Sistem'}</td>
           <td class="text-[12.5px] text-ink-600 max-w-[420px]">${ringkasPerubahan(l.data_lama, l.data_baru)}</td>
-        </tr>`).join('') : `<tr><td colspan="5" class="text-center text-ink-400 py-8">Belum ada aktivitas tercatat.</td></tr>`}
-      </tbody></table>
-    </div>`;
-    document.getElementById('audit-export').innerHTML = exportButtons();
-    wireExportButtons(document.getElementById('audit-export'),
-      ()=>exportExcel(logs.map(l=>({ 'Waktu': l.created_at, 'Tabel': AUDIT_TABEL_LABEL[l.tabel]||l.tabel, 'Aksi': AUDIT_AKSI_LABEL[l.aksi]||l.aksi, 'Oleh': l.actor_nama||'Sistem', 'Ringkasan': ringkasPerubahan(l.data_lama, l.data_baru) })), 'sijalan_log_aktivitas', 'Log Aktivitas'),
-      ()=>exportPdfTabel('Log Aktivitas', [
-        {header:'Waktu', key:'created_at'}, {header:'Tabel', key:'tabel_label'}, {header:'Aksi', key:'aksi_label'}, {header:'Oleh', key:'actor_nama'}, {header:'Ringkasan', key:'ringkasan'},
-      ], logs.map(l=>({ created_at: new Date(l.created_at).toLocaleString('id-ID'), tabel_label: AUDIT_TABEL_LABEL[l.tabel]||l.tabel, aksi_label: AUDIT_AKSI_LABEL[l.aksi]||l.aksi, actor_nama: l.actor_nama||'Sistem', ringkasan: ringkasPerubahan(l.data_lama, l.data_baru) })), 'sijalan_log_aktivitas'));
-  }catch(err){ v.innerHTML = errorPanel(err); }
+        </tr>`).join('') : `<tr><td colspan="5" class="text-center text-ink-400 py-8">Tidak ada aktivitas yang cocok dengan filter.</td></tr>`;
+    }catch(err){ tbody.innerHTML = `<tr><td colspan="5" class="text-center text-[13px] text-[var(--bad)] py-8">${err.message}</td></tr>`; }
+  }
+
+  document.getElementById('audit-export').innerHTML = exportButtons();
+  wireExportButtons(document.getElementById('audit-export'),
+    ()=>exportExcel(currentLogs.map(l=>({ 'Waktu': l.created_at, 'Tabel': AUDIT_TABEL_LABEL[l.tabel]||l.tabel, 'Aksi': AUDIT_AKSI_LABEL[l.aksi]||l.aksi, 'Oleh': l.actor_nama||'Sistem', 'Ringkasan': ringkasPerubahan(l.data_lama, l.data_baru) })), 'sijalan_log_aktivitas', 'Log Aktivitas'),
+    ()=>exportPdfTabel('Log Aktivitas', [
+      {header:'Waktu', key:'created_at'}, {header:'Tabel', key:'tabel_label'}, {header:'Aksi', key:'aksi_label'}, {header:'Oleh', key:'actor_nama'}, {header:'Ringkasan', key:'ringkasan'},
+    ], currentLogs.map(l=>({ created_at: new Date(l.created_at).toLocaleString('id-ID'), tabel_label: AUDIT_TABEL_LABEL[l.tabel]||l.tabel, aksi_label: AUDIT_AKSI_LABEL[l.aksi]||l.aksi, actor_nama: l.actor_nama||'Sistem', ringkasan: ringkasPerubahan(l.data_lama, l.data_baru) })), 'sijalan_log_aktivitas'));
+
+  const namaInput = document.getElementById('f-audit-nama');
+  const debouncedNama = debounce(()=>{ filter.actorNama = namaInput.value.trim(); loadAndRender(); }, 400);
+  namaInput.addEventListener('input', debouncedNama);
+  document.getElementById('f-audit-tabel').addEventListener('change', (e)=>{ filter.tabel = e.target.value; loadAndRender(); });
+  document.getElementById('f-audit-aksi').addEventListener('change', (e)=>{ filter.aksi = e.target.value; loadAndRender(); });
+  document.getElementById('f-audit-dari').addEventListener('change', (e)=>{ filter.dari = e.target.value; loadAndRender(); });
+  document.getElementById('f-audit-sampai').addEventListener('change', (e)=>{ filter.sampai = e.target.value; loadAndRender(); });
+  document.getElementById('f-audit-reset').addEventListener('click', ()=>{
+    filter.tabel=''; filter.aksi=''; filter.actorNama=''; filter.dari=''; filter.sampai='';
+    namaInput.value=''; document.getElementById('f-audit-tabel').value=''; document.getElementById('f-audit-aksi').value='';
+    document.getElementById('f-audit-dari').value=''; document.getElementById('f-audit-sampai').value='';
+    loadAndRender();
+  });
+
+  loadAndRender();
 }
 
 // --- 14. VIEW: ADMIN (Pengguna) -------------------------------------------
