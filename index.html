@@ -506,6 +506,7 @@ const api = {
   async kondisiTerkini(){ const {data,error} = await sb.from('v_kondisi_terkini').select('*'); if(error) throw error; return data; },
   async rekapKondisiKabupaten(){ const {data,error} = await sb.from('v_rekap_kondisi_kabupaten').select('*'); if(error) throw error; return data; },
   async skorPrioritas(limit=10){ const {data,error} = await sb.from('v_skor_prioritas').select('*').order('skor_prioritas',{ascending:false}).limit(limit); if(error) throw error; return data; },
+  async skorPrioritasAll(){ const {data,error} = await sb.from('v_skor_prioritas').select('*'); if(error) throw error; return data; },
   async insertSurvei(payload){ const {error} = await sb.from('survei_kondisi').insert(payload); if(error) throw error; },
   async updateSurvei(id, payload){ const {error} = await sb.from('survei_kondisi').update(payload).eq('id',id); if(error) throw error; },
   async deleteSurvei(id){ const {error} = await sb.from('survei_kondisi').delete().eq('id',id); if(error) throw error; },
@@ -970,12 +971,18 @@ function errorPanel(err){
 async function viewPeta(){
   const v = document.getElementById('view');
   v.innerHTML = `
-  <div class="mb-5"><h1 class="font-display font-extrabold text-2xl text-ink-900">Peta Jaringan Jalan</h1>
-  <p class="text-ink-500 text-[13.5px]">Sebaran ruas jalan, diwarnai berdasarkan kondisi terkini</p></div>
+  <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+    <div><h1 class="font-display font-extrabold text-2xl text-ink-900">Peta Jaringan Jalan</h1>
+    <p class="text-ink-500 text-[13.5px]" id="peta-subtitle">Sebaran ruas jalan, diwarnai berdasarkan kondisi terkini</p></div>
+    <div class="inline-flex rounded-lg border border-ink-200 overflow-hidden text-[12.5px] font-semibold" id="peta-mode-toggle">
+      <button data-mode="kondisi" class="px-3.5 py-2 bg-accent-dark text-white transition">Kondisi</button>
+      <button data-mode="prioritas" class="px-3.5 py-2 bg-white text-ink-600 hover:bg-ink-50 transition">Prioritas Penanganan</button>
+    </div>
+  </div>
   <div class="card p-3">
     <div id="map" style="height:560px;"></div>
   </div>
-  <div class="flex flex-wrap gap-4 mt-3">
+  <div class="flex flex-wrap gap-4 mt-3" id="peta-legend">
     ${KONDISI_ORDER.map(k=>`<div class="flex items-center gap-1.5 text-[12px] text-ink-600"><span class="w-2.5 h-2.5 rounded-full" style="background:${KONDISI_COLOR[k]}"></span>${KONDISI_LABEL[k]}</div>`).join('')}
     <div class="flex items-center gap-1.5 text-[12px] text-ink-600"><span class="w-2.5 h-2.5 rounded-full" style="background:#8896AC"></span>Belum disurvei</div>
   </div>
@@ -987,31 +994,86 @@ async function viewPeta(){
   state.map = map;
   const layerGroup = L.layerGroup().addTo(map);
 
+  const LEGEND_KONDISI = `${KONDISI_ORDER.map(k=>`<div class="flex items-center gap-1.5 text-[12px] text-ink-600"><span class="w-2.5 h-2.5 rounded-full" style="background:${KONDISI_COLOR[k]}"></span>${KONDISI_LABEL[k]}</div>`).join('')}
+    <div class="flex items-center gap-1.5 text-[12px] text-ink-600"><span class="w-2.5 h-2.5 rounded-full" style="background:#8896AC"></span>Belum disurvei</div>`;
+  const LEGEND_PRIORITAS = `
+    <div class="flex items-center gap-1.5 text-[12px] text-ink-600"><span class="w-2.5 h-2.5 rounded-full" style="background:#C43D3D"></span>Mendesak (skor ≥ 70)</div>
+    <div class="flex items-center gap-1.5 text-[12px] text-ink-600"><span class="w-2.5 h-2.5 rounded-full" style="background:#E0672B"></span>Sedang (skor 40–69)</div>
+    <div class="flex items-center gap-1.5 text-[12px] text-ink-600"><span class="w-2.5 h-2.5 rounded-full" style="background:#2E8B57"></span>Aman (skor &lt; 40)</div>
+    <div class="flex items-center gap-1.5 text-[12px] text-ink-600"><span class="w-2.5 h-2.5 rounded-full" style="background:#8896AC"></span>Belum ada skor</div>`;
+
+  function skorToColor(skor){
+    if(skor==null) return '#8896AC';
+    if(skor>=70) return '#C43D3D';
+    if(skor>=40) return '#E0672B';
+    return '#2E8B57';
+  }
+
   try{
-    const [ruas, kondisi] = await Promise.all([api.ruasList(), api.kondisiTerkini()]);
+    const [ruas, kondisi, skorList] = await Promise.all([api.ruasList(), api.kondisiTerkini(), api.skorPrioritasAll().catch(()=>[])]);
     // worst kondisi per ruas
     const worstByRuas = {};
     kondisi.forEach(row=>{
       const cur = worstByRuas[row.ruas_id];
       if(!cur || KONDISI_ORDER.indexOf(row.kondisi) < KONDISI_ORDER.indexOf(cur)) worstByRuas[row.ruas_id] = row.kondisi;
     });
-    let drawn = 0;
-    const bounds = [];
-    ruas.forEach(r=>{
-      const parsed = wkbHexToLatLngs(r.geom);
-      if(!parsed) return;
-      const kondisi = worstByRuas[r.id];
-      const color = kondisi ? KONDISI_COLOR[kondisi] : '#8896AC';
-      let layer;
-      if(parsed.type === 'LineString'){ layer = L.polyline(parsed.coords, {color, weight:5, opacity:.85}); parsed.coords.forEach(c=>bounds.push(c)); }
-      else { layer = L.circleMarker(parsed.coords, {radius:7, color, fillColor:color, fillOpacity:.9}); bounds.push(parsed.coords); }
-      layer.bindPopup(`<b class="font-mono">${r.kode_ruas}</b><br>${r.nama_ruas}<br><span style="color:${color}">${kondisi?KONDISI_LABEL[kondisi]:'Belum disurvei'}</span> · ${fmtNum(r.panjang_km,1)} km`);
-      layer.on('click', ()=>{ state.selectedRuasId = r.id; state.route='ruas'; renderShell(); });
-      layer.addTo(layerGroup);
-      drawn++;
+    // skor prioritas tertinggi per ruas (satu ruas bisa punya beberapa segmen/baris skor)
+    const skorByRuas = {};
+    skorList.forEach(row=>{
+      const cur = skorByRuas[row.ruas_id];
+      if(cur==null || Number(row.skor_prioritas) > cur) skorByRuas[row.ruas_id] = Number(row.skor_prioritas);
     });
-    if(drawn > 0 && bounds.length){ map.fitBounds(bounds, {padding:[30,30]}); }
-    else { document.getElementById('map-empty').classList.remove('hidden'); }
+
+    let mode = 'kondisi';
+    let drawn = 0;
+
+    function draw(){
+      layerGroup.clearLayers();
+      drawn = 0;
+      const bounds = [];
+      ruas.forEach(r=>{
+        const parsed = wkbHexToLatLngs(r.geom);
+        if(!parsed) return;
+        let color, popupInfo;
+        if(mode === 'kondisi'){
+          const k = worstByRuas[r.id];
+          color = k ? KONDISI_COLOR[k] : '#8896AC';
+          popupInfo = `<span style="color:${color}">${k?KONDISI_LABEL[k]:'Belum disurvei'}</span>`;
+        } else {
+          const skor = skorByRuas[r.id];
+          color = skorToColor(skor);
+          popupInfo = skor!=null ? `<span style="color:${color}">Skor prioritas: ${fmtNum(skor,1)}</span>` : `<span style="color:${color}">Belum ada skor prioritas</span>`;
+        }
+        let layer;
+        if(parsed.type === 'LineString'){ layer = L.polyline(parsed.coords, {color, weight:5, opacity:.85}); parsed.coords.forEach(c=>bounds.push(c)); }
+        else { layer = L.circleMarker(parsed.coords, {radius:7, color, fillColor:color, fillOpacity:.9}); bounds.push(parsed.coords); }
+        layer.bindPopup(`<b class="font-mono">${r.kode_ruas}</b><br>${r.nama_ruas}<br>${popupInfo} · ${fmtNum(r.panjang_km,1)} km`);
+        layer.on('click', ()=>{ state.selectedRuasId = r.id; state.route='ruas'; renderShell(); });
+        layer.addTo(layerGroup);
+        drawn++;
+      });
+      if(drawn > 0 && bounds.length){ map.fitBounds(bounds, {padding:[30,30]}); document.getElementById('map-empty').classList.add('hidden'); }
+      else { document.getElementById('map-empty').classList.remove('hidden'); }
+    }
+
+    draw();
+
+    document.getElementById('peta-mode-toggle').addEventListener('click', (e)=>{
+      const btn = e.target.closest('button[data-mode]');
+      if(!btn) return;
+      mode = btn.dataset.mode;
+      document.querySelectorAll('#peta-mode-toggle button').forEach(b=>{
+        b.classList.toggle('bg-accent-dark', b===btn);
+        b.classList.toggle('text-white', b===btn);
+        b.classList.toggle('bg-white', b!==btn);
+        b.classList.toggle('text-ink-600', b!==btn);
+      });
+      document.getElementById('peta-subtitle').textContent = mode==='kondisi'
+        ? 'Sebaran ruas jalan, diwarnai berdasarkan kondisi terkini'
+        : 'Sebaran ruas jalan, diwarnai berdasarkan skor prioritas penanganan (kondisi + LHR + bencana)';
+      document.getElementById('peta-legend').innerHTML = mode==='kondisi' ? LEGEND_KONDISI : LEGEND_PRIORITAS;
+      draw();
+    });
   }catch(err){ v.insertAdjacentHTML('beforeend', errorPanel(err)); }
 }
 function emptyStateMap(){
