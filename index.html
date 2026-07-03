@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -11,6 +12,11 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0A2036">
 <style>
   :root{
     --navy-950:#071A2E; --navy-900:#0A2036; --navy-800:#0F2A4A; --navy-700:#16385E; --navy-600:#1D5FA8;
@@ -75,6 +81,11 @@ const SUPABASE_URL = "https://msfnmayaltlghhoibqso.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1zZm5tYXlhbHRsZ2hob2licXNvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5MTk4OTUsImV4cCI6MjA5ODQ5NTg5NX0.9bAlNdDP2LhDBFp87jPOB-UbhFsYpSQvoind-JkGvdI";
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Registrasi service worker (mode offline: app shell tetap terbuka tanpa sinyal).
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{ navigator.serviceWorker.register('./sw.js').catch(e=>console.error('[sw] gagal daftar:', e)); });
+}
+
 // --- 2. STATE GLOBAL ------------------------------------------------------
 const state = {
   user: null, profile: null, route: 'dashboard',
@@ -88,6 +99,57 @@ const PENUGASAN_STATUS_LABEL = {belum_disurvei:'Belum Disurvei', sedang_disurvei
 const PENUGASAN_STATUS_COLOR = {belum_disurvei:'#8896AC', sedang_disurvei:'#E8A33D', selesai:'#2E8B57'};
 const ROLE_LABEL = {admin:'Administrator', kepala_bidang:'Kepala Bidang', petugas_lapangan:'Petugas Lapangan', viewer:'Peninjau'};
 
+// --- MODE OFFLINE: ANTREAN SURVEI KONDISI ----------------------------------
+// Petugas lapangan sering berada di area minim/tanpa sinyal. Kalau simpan
+// survei kondisi gagal karena jaringan, data disimpan dulu di localStorage
+// (bukan hilang), lalu otomatis dicoba kirim ulang saat sinyal kembali.
+// Catatan: foto TIDAK diikutkan dalam antrean offline (ukuran besar untuk
+// localStorage) — hanya data survei tanpa foto yang diantrekan; foto perlu
+// ditambahkan lagi saat online lewat menu Ubah.
+const OFFLINE_QUEUE_KEY = 'sijalan_antrean_offline_v1';
+function getAntreanOffline(){ try{ return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || '[]'); }catch(e){ return []; } }
+function simpanAntreanOffline(list){ localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(list)); updateOfflineBadge(); }
+function tambahAntreanOffline(payload){
+  const list = getAntreanOffline();
+  list.push({ id: 'off_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), payload, dibuat: new Date().toISOString() });
+  simpanAntreanOffline(list);
+}
+function isKemungkinanErrorJaringan(err){
+  const m = (err && err.message || '').toLowerCase();
+  return !navigator.onLine || m.includes('failed to fetch') || m.includes('networkerror') || m.includes('load failed');
+}
+async function prosesAntreanOffline(){
+  if(!navigator.onLine) return;
+  const list = getAntreanOffline();
+  if(!list.length) return;
+  const sisa = [];
+  for(const item of list){
+    try{ await api.insertSurvei(item.payload); }
+    catch(err){ sisa.push(item); }
+  }
+  simpanAntreanOffline(sisa);
+  if(sisa.length < list.length){
+    notifikasiToast(`${list.length - sisa.length} data survei offline berhasil disinkronkan.`);
+    if(state.route==='ruas' && state.selectedRuasId) viewRuasDetail(state.selectedRuasId);
+  }
+}
+function updateOfflineBadge(){
+  const badge = document.getElementById('offline-badge');
+  const n = getAntreanOffline().length;
+  if(badge){ badge.textContent = n; badge.classList.toggle('hidden', n===0); }
+}
+function notifikasiToast(msg){
+  const t = el(`<div class="fixed bottom-5 left-1/2 -translate-x-1/2 z-[60] bg-navy-900 text-white text-[13px] font-medium px-4 py-2.5 rounded-xl shadow-lg">${msg}</div>`);
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 4000);
+}
+window.addEventListener('online', ()=>{ prosesAntreanOffline(); updateConnBadge(); });
+window.addEventListener('offline', ()=>{ updateConnBadge(); });
+function updateConnBadge(){
+  const b = document.getElementById('conn-badge');
+  if(b) b.classList.toggle('hidden', navigator.onLine);
+}
+
 function isEditor(){ return state.profile && ['admin','kepala_bidang','petugas_lapangan'].includes(state.profile.role); }
 function isAdmin(){ return state.profile && state.profile.role === 'admin'; }
 function isPenugas(){ return state.profile && ['admin','kepala_bidang'].includes(state.profile.role); }
@@ -96,6 +158,51 @@ function fmtRp(n){ if(n===null||n===undefined) return '—'; return 'Rp ' + Numb
 function fmtDate(d){ if(!d) return '—'; return new Date(d).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}); }
 function badge(kondisi){ if(!kondisi) return `<span class="badge badge-na">Belum disurvei</span>`; return `<span class="badge badge-${kondisi}"><svg width="6" height="6"><circle cx="3" cy="3" r="3" fill="currentColor"/></svg>${KONDISI_LABEL[kondisi]}</span>`; }
 function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstElementChild; }
+
+// --- EKSPOR EXCEL & PDF -----------------------------------------------------
+// Fungsi generik: exportExcel(rows, filename, sheetName) menerima array of
+// object (key = nama kolom) dan mengunduh sebagai file .xlsx.
+function exportExcel(rows, filename='data', sheetName='Data'){
+  try{
+    if(!rows || !rows.length){ alert('Tidak ada data untuk diekspor.'); return; }
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0,31));
+    XLSX.writeFile(wb, `${filename}.xlsx`);
+  }catch(e){ console.error('[export-excel] gagal:', e); alert('Gagal membuat file Excel: '+e.message); }
+}
+// exportPdfTabel(judul, kolom, rows, filename) membuat PDF tabel sederhana.
+// kolom: array {header, key}. rows: array of object.
+function exportPdfTabel(judul, kolom, rows, filename='data'){
+  try{
+    if(!rows || !rows.length){ alert('Tidak ada data untuk diekspor.'); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: kolom.length > 5 ? 'landscape' : 'portrait' });
+    doc.setFontSize(13);
+    doc.text(judul, 14, 15);
+    doc.setFontSize(9);
+    doc.text(`SIJALAN · Diekspor ${new Date().toLocaleString('id-ID')}`, 14, 21);
+    doc.autoTable({
+      startY: 26,
+      head: [kolom.map(k=>k.header)],
+      body: rows.map(r=>kolom.map(k=>{ const v = r[k.key]; return v===null||v===undefined? '—' : String(v); })),
+      styles: { fontSize: 8, cellPadding: 2.5 },
+      headStyles: { fillColor: [10,32,54] },
+      margin: { left: 14, right: 14 },
+    });
+    doc.save(`${filename}.pdf`);
+  }catch(e){ console.error('[export-pdf] gagal:', e); alert('Gagal membuat file PDF: '+e.message); }
+}
+function exportButtons(onExcel, onPdf){
+  return `<div class="flex gap-2">
+    <button type="button" data-export="excel" class="btn-ghost !py-2 !px-3 text-[12.5px]">${icon('doc','w-3.5 h-3.5')} Excel</button>
+    <button type="button" data-export="pdf" class="btn-ghost !py-2 !px-3 text-[12.5px]">${icon('doc','w-3.5 h-3.5')} PDF</button>
+  </div>`;
+}
+function wireExportButtons(container, onExcel, onPdf){
+  container.querySelector('[data-export="excel"]')?.addEventListener('click', onExcel);
+  container.querySelector('[data-export="pdf"]')?.addEventListener('click', onPdf);
+}
 
 // Pasangkan <select> yang punya opsi "Lainnya" dengan <input> teks di sebelahnya,
 // supaya saat opsi "Lainnya" dipilih, user langsung mengetik nilainya di situ
@@ -158,10 +265,12 @@ const KOMPRESI_FOTO = {
   minUkuranUntukKompres: 300 * 1024, // < 300KB dianggap sudah cukup kecil, lewati
 };
 function kompresGambar(file, opt = {}){
-  const { maxDimensi, kualitas, minUkuranUntukKompres } = { ...KOMPRESI_FOTO, ...opt };
+  const { maxDimensi, kualitas, minUkuranUntukKompres, watermarkLines } = { ...KOMPRESI_FOTO, ...opt };
+  const needWatermark = Array.isArray(watermarkLines) && watermarkLines.some(Boolean);
   return new Promise((resolve)=>{
-    // Lewati kompresi untuk file bukan gambar, GIF (animasi), atau yang sudah kecil.
-    if(!file || !file.type || !file.type.startsWith('image/') || file.type === 'image/gif' || file.size <= minUkuranUntukKompres){
+    // Lewati proses untuk file bukan gambar, GIF (animasi). File kecil tanpa
+    // kebutuhan watermark juga dilewati (sudah cukup kecil).
+    if(!file || !file.type || !file.type.startsWith('image/') || file.type === 'image/gif' || (!needWatermark && file.size <= minUkuranUntukKompres)){
       resolve(file); return;
     }
     const objUrl = URL.createObjectURL(file);
@@ -178,23 +287,70 @@ function kompresGambar(file, opt = {}){
         canvas.width = width; canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
+        if(needWatermark) gambarWatermarkFoto(ctx, width, height, watermarkLines);
         canvas.toBlob((blob)=>{
-          if(!blob || blob.size >= file.size){ resolve(file); return; } // hasil tidak lebih kecil -> pakai asli
+          if(!blob || (!needWatermark && blob.size >= file.size)){ resolve(file); return; } // hasil tidak lebih kecil & tanpa watermark -> pakai asli
           const namaBaru = file.name.replace(/\.[a-zA-Z0-9]+$/, '') + '.jpg';
           const hasil = new File([blob], namaBaru, { type: 'image/jpeg', lastModified: Date.now() });
-          console.log(`[kompresi-foto] ${file.name}: ${(file.size/1024).toFixed(0)}KB -> ${(hasil.size/1024).toFixed(0)}KB`);
+          console.log(`[foto] ${file.name}: ${(file.size/1024).toFixed(0)}KB -> ${(hasil.size/1024).toFixed(0)}KB${needWatermark?' (+watermark)':''}`);
           resolve(hasil);
         }, 'image/jpeg', kualitas);
-      }catch(e){ console.error('[kompresi-foto] gagal, pakai file asli:', e); resolve(file); }
+      }catch(e){ console.error('[foto] gagal proses, pakai file asli:', e); resolve(file); }
     };
     img.onerror = ()=>{ URL.revokeObjectURL(objUrl); resolve(file); };
     img.src = objUrl;
   });
 }
 
+// --- WATERMARK GPS + WAKTU PADA FOTO ---------------------------------------
+// Menempelkan koordinat GPS, waktu, dan nama ruas langsung pada gambar (bukan
+// hanya metadata EXIF, yang sering hilang saat diunggah/dibagikan). Membuat
+// foto dokumentasi punya bukti lokasi & waktu yang terlihat langsung.
+function gambarWatermarkFoto(ctx, width, height, baris){
+  const lines = (baris||[]).filter(Boolean);
+  if(!lines.length) return;
+  const fontSize = Math.max(11, Math.round(width * 0.024));
+  const lineH = Math.round(fontSize * 1.45);
+  const pad = Math.round(fontSize * 0.7);
+  ctx.font = `600 ${fontSize}px sans-serif`;
+  const boxH = lines.length * lineH + pad * 2;
+  ctx.fillStyle = 'rgba(7,26,46,0.62)';
+  ctx.fillRect(0, height - boxH, width, boxH);
+  ctx.fillStyle = '#ffffff';
+  ctx.textBaseline = 'top';
+  lines.forEach((line, i)=>{ ctx.fillText(line, pad, height - boxH + pad + i * lineH); });
+}
+// Ambil koordinat GPS singkat (timeout pendek) untuk watermark foto. Kalau
+// perangkat tidak mendukung GPS, atau izin ditolak, atau timeout — kembalikan
+// null (watermark tetap dibuat, hanya tanpa baris koordinat).
+function ambilKoordinatSingkat(timeoutMs = 3500){
+  return new Promise((resolve)=>{
+    if(!navigator.geolocation){ resolve(null); return; }
+    const timer = setTimeout(()=>resolve(null), timeoutMs);
+    navigator.geolocation.getCurrentPosition(
+      (pos)=>{ clearTimeout(timer); resolve({ lat: pos.coords.latitude, long: pos.coords.longitude }); },
+      ()=>{ clearTimeout(timer); resolve(null); },
+      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 60000 }
+    );
+  });
+}
+
 async function uploadFotoKegiatan(file, ruasId, label, folder='penanganan'){
   if(!file) return null;
-  const fileFinal = await kompresGambar(file);
+  let watermarkLines = null;
+  if(file.type && file.type.startsWith('image/') && file.type !== 'image/gif'){
+    try{
+      const ruasNama = (state.ruasCache||[]).find(r=>r.id===ruasId)?.nama_ruas || null;
+      const koord = await ambilKoordinatSingkat();
+      const waktu = new Date().toLocaleString('id-ID', {day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'});
+      watermarkLines = [
+        ruasNama ? `Ruas: ${ruasNama}` : null,
+        `SIJALAN · ${waktu}`,
+        koord ? `GPS: ${koord.lat.toFixed(6)}, ${koord.long.toFixed(6)}` : null,
+      ];
+    }catch(e){ watermarkLines = null; }
+  }
+  const fileFinal = await kompresGambar(file, watermarkLines ? { watermarkLines } : {});
   const ext = (fileFinal.name.split('.').pop()||'jpg').toLowerCase().replace(/[^a-z0-9]/g,'') || 'jpg';
   const path = `${folder}/${ruasId||'umum'}/${Date.now()}_${label}.${ext}`;
   const contentType = fileFinal.type && fileFinal.type.startsWith('image/') ? fileFinal.type : (ext==='png'?'image/png':ext==='webp'?'image/webp':ext==='gif'?'image/gif':'image/jpeg');
@@ -415,6 +571,22 @@ const api = {
   async updatePerlengkapan(id, payload){ const {error} = await sb.from('perlengkapan_jalan').update(payload).eq('id',id); if(error) throw error; },
   async deletePerlengkapan(id){ const {error} = await sb.from('perlengkapan_jalan').delete().eq('id',id); if(error) throw error; },
 
+  // --- data lalu lintas (LHR) ---
+  async lalulintasList(){ const {data,error} = await sb.from('data_lalu_lintas').select('*, segmen_jalan(id,kode_segmen,ruas_jalan(id,kode_ruas,nama_ruas))').order('tahun',{ascending:false}); if(error) throw error; return data; },
+  async insertLalulintas(payload){ const {error} = await sb.from('data_lalu_lintas').insert(payload); if(error) throw error; },
+  async updateLalulintas(id, payload){ const {error} = await sb.from('data_lalu_lintas').update(payload).eq('id',id); if(error) throw error; },
+  async deleteLalulintas(id){ const {error} = await sb.from('data_lalu_lintas').delete().eq('id',id); if(error) throw error; },
+
+  // --- log aktivitas (audit) ---
+  async auditLog(limit=200){ const {data,error} = await sb.from('v_audit_log').select('*').limit(limit); if(error) throw error; return data; },
+
+  // --- penugasan survei (untuk widget notifikasi) ---
+  async penugasanOverdue(){
+    const today = new Date().toISOString().slice(0,10);
+    const {data,error} = await sb.from('v_penugasan_survei').select('*').lt('target_tanggal', today).neq('status','selesai').order('target_tanggal');
+    if(error) throw error; return data;
+  },
+
   // --- pengguna ---
   async profiles(){ const {data,error} = await sb.from('profiles').select('*, kabupaten(nama)').order('created_at'); if(error) throw error; return data; },
   async updateRole(id, role){ const {error} = await sb.from('profiles').update({role}).eq('id',id); if(error) throw error; },
@@ -468,6 +640,8 @@ const ICONS = {
   flag:'<path d="M5 3v18"/><path d="M5 4h11l-2.5 3.5L16 11H5"/>',
   image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M21 16l-5.5-5.5L4 21"/>',
   clipboard:'<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1Z"/><path d="M8.5 11h7M8.5 14.5h7M8.5 18h4"/>',
+  bell:'<path d="M6 8a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6Z"/><path d="M10 21a2 2 0 0 0 4 0"/>',
+  wifioff:'<path d="M2 4l20 16"/><path d="M8.5 16.5a5 5 0 0 1 5.6-1"/><path d="M5 12.5a10 10 0 0 1 3.5-2.3"/><path d="M12 20h.01"/><path d="M16.8 13.5A10 10 0 0 1 19 12"/><path d="M19.5 8.7A15 15 0 0 1 22 10"/><path d="M2 9a15 15 0 0 1 4-2.5"/>',
 };
 function actionBtns({onEdit, onDelete, onDetail}={}){
   let html = '<div class="flex items-center gap-1.5" onclick="event.stopPropagation()">';
@@ -496,8 +670,17 @@ function renderShell(){
         <nav class="hidden md:flex items-center gap-7 flex-1">
           ${NAV_ITEMS.map(n=>`<button data-nav="${n.id}" class="tab-btn ${state.route===n.id?'active':''} flex items-center gap-2 text-[13.5px] font-semibold pb-4 pt-4">${icon(n.icon,'w-4 h-4')}${n.label}</button>`).join('')}
           ${isAdmin()?`<button data-nav="admin" class="tab-btn ${state.route==='admin'?'active':''} flex items-center gap-2 text-[13.5px] font-semibold pb-4 pt-4">${icon('user','w-4 h-4')}Pengguna</button>`:''}
+          ${isAdmin()?`<button data-nav="log" class="tab-btn ${state.route==='log'?'active':''} flex items-center gap-2 text-[13.5px] font-semibold pb-4 pt-4">${icon('clipboard','w-4 h-4')}Log Aktivitas</button>`:''}
         </nav>
         <div class="flex items-center gap-3">
+          <span id="conn-badge" class="hidden inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-white bg-[var(--bad)]/80 rounded-full px-2.5 py-1">${icon('wifioff','w-3.5 h-3.5')}Offline<span id="offline-badge" class="hidden ml-0.5 bg-white/25 rounded-full px-1.5">0</span></span>
+          <div class="relative">
+            <button id="btn-notif" class="relative p-2 rounded-lg hover:bg-white/10 text-white/85 hover:text-white" title="Notifikasi">
+              ${icon('bell','w-5 h-5')}
+              <span id="notif-count" class="hidden absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-[var(--bad)] text-white text-[10px] font-bold flex items-center justify-center">0</span>
+            </button>
+            <div id="notif-panel" class="hidden absolute right-0 top-11 w-80 max-h-96 overflow-y-auto card shadow-xl z-40"></div>
+          </div>
           <div class="hidden sm:block text-right leading-tight">
             <div class="text-white text-[13px] font-semibold">${state.profile?.nama || state.user.email}</div>
             <div class="text-[11px] text-accent font-semibold">${ROLE_LABEL[state.profile?.role]||'Peninjau'}</div>
@@ -507,6 +690,7 @@ function renderShell(){
       </div>
       <div class="md:hidden flex gap-4 overflow-x-auto px-5 pb-2 -mt-1">
         ${NAV_ITEMS.map(n=>`<button data-nav="${n.id}" class="tab-btn ${state.route===n.id?'active':''} text-[12.5px] font-semibold whitespace-nowrap pb-2">${n.label}</button>`).join('')}
+        ${isAdmin()?`<button data-nav="log" class="tab-btn ${state.route==='log'?'active':''} text-[12.5px] font-semibold whitespace-nowrap pb-2">Log Aktivitas</button>`:''}
       </div>
     </header>
     <main class="flex-1 max-w-[1400px] w-full mx-auto px-5 py-7" id="view"></main>
@@ -514,11 +698,39 @@ function renderShell(){
   </div>`;
   root.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click', ()=>{ state.route=b.dataset.nav; renderShell(); routeView(); }));
   document.getElementById('btn-logout').addEventListener('click', async ()=>{ await sb.auth.signOut(); });
+  updateConnBadge(); updateOfflineBadge();
+  wireNotifBell();
   routeView();
 }
 
+// --- NOTIFIKASI: penugasan survei yang lewat tenggat -----------------------
+async function wireNotifBell(){
+  const btn = document.getElementById('btn-notif');
+  const panel = document.getElementById('notif-panel');
+  const countEl = document.getElementById('notif-count');
+  if(!btn) return;
+  let overdue = [];
+  try{ overdue = await api.penugasanOverdue(); }catch(e){ console.error('[notif] gagal memuat penugasan overdue:', e); }
+  if(overdue.length){ countEl.textContent = overdue.length; countEl.classList.remove('hidden'); }
+  panel.innerHTML = overdue.length ? `
+    <div class="p-3 border-b border-line font-display font-bold text-[13px]">Penugasan Survei Lewat Tenggat (${overdue.length})</div>
+    ${overdue.map(o=>`
+      <div class="p-3 border-b border-line hover:bg-[#F8FAFD]">
+        <div class="font-semibold text-[13px]">${o.kode_ruas} — ${o.nama_ruas}</div>
+        <div class="text-[12px] text-ink-500 mt-0.5">Petugas: ${o.nama_petugas} · Target: ${fmtDate(o.target_tanggal)}</div>
+        <div class="text-[11.5px] text-[var(--bad)] mt-0.5 font-medium capitalize">${PENUGASAN_STATUS_LABEL[o.status]||o.status}</div>
+      </div>`).join('')}
+  ` : `<div class="p-6 text-center text-ink-400 text-[12.5px]">Tidak ada penugasan yang lewat tenggat. 👍</div>`;
+  btn.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    panel.classList.toggle('hidden');
+  });
+  document.addEventListener('click', (e)=>{ if(!panel.contains(e.target) && e.target!==btn){ panel.classList.add('hidden'); } }, {once:true});
+  panel.addEventListener('click', ()=>{ if(overdue.length){ state.route='penugasan'; renderShell(); routeView(); } });
+}
+
 function routeView(){
-  const map = {dashboard:viewDashboard, peta:viewPeta, ruas:viewRuas, kegiatan:viewKegiatan, dokumen:viewDokumen, aset:viewAset, anggaran:viewAnggaran, penugasan:viewPenugasan, bencana:viewBencana, admin:viewAdmin};
+  const map = {dashboard:viewDashboard, peta:viewPeta, ruas:viewRuas, kegiatan:viewKegiatan, dokumen:viewDokumen, aset:viewAset, anggaran:viewAnggaran, penugasan:viewPenugasan, bencana:viewBencana, admin:viewAdmin, log:viewLogAktivitas};
   (map[state.route]||viewDashboard)();
 }
 
@@ -1185,7 +1397,20 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
         foto_path: fotoPaths[0] || null,
       };
       if(isEdit){ await api.updateSurvei(editData.id, payload); }
-      else{ payload.created_by = state.user.id; await api.insertSurvei(payload); }
+      else{
+        payload.created_by = state.user.id;
+        try{ await api.insertSurvei(payload); }
+        catch(insErr){
+          if(!newFiles.length && isKemungkinanErrorJaringan(insErr)){
+            tambahAntreanOffline(payload);
+            overlay.remove();
+            notifikasiToast('Tidak ada koneksi. Data survei disimpan di perangkat & akan otomatis terkirim saat online kembali.');
+            if(onSaved) onSaved(); else viewRuasDetail(ruas.id);
+            return;
+          }
+          throw insErr;
+        }
+      }
       overlay.remove();
       if(onSaved) onSaved(); else viewRuasDetail(ruas.id);
     }catch(err){
@@ -1592,7 +1817,10 @@ async function viewKegiatan(){
     <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
       <div><h1 class="font-display font-extrabold text-2xl text-ink-900">Kegiatan Penanganan</h1>
       <p class="text-ink-500 text-[13.5px]">${kegiatan.length} kegiatan tercatat, terhubung langsung ke master ruas jalan</p></div>
-      ${isEditor()?`<button id="btn-add-kegiatan" class="btn-accent">+ Tambah Kegiatan Penanganan</button>`:''}
+      <div class="flex items-center gap-2 flex-wrap">
+        <div id="kegiatan-export"></div>
+        ${isEditor()?`<button id="btn-add-kegiatan" class="btn-accent">+ Tambah Kegiatan Penanganan</button>`:''}
+      </div>
     </div>
     <div class="flex flex-wrap gap-3 mb-4">
       <input id="fk-search" placeholder="Cari ruas / sub kegiatan…" class="max-w-xs">
@@ -1649,6 +1877,17 @@ async function viewKegiatan(){
     ['fk-search','fk-jenis','fk-status'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
     renderRows();
     if(isEditor()){ document.getElementById('btn-add-kegiatan').addEventListener('click', ()=>openKegiatanFormModal(ruas, null, null, ()=>viewKegiatan())); }
+    document.getElementById('kegiatan-export').innerHTML = exportButtons();
+    wireExportButtons(document.getElementById('kegiatan-export'),
+      ()=>exportExcel(kegiatan.map(k=>({
+        'Kode Ruas': k.kode_ruas, 'Nama Ruas': k.nama_ruas, 'Jenis Penanganan': k.jenis_penanganan,
+        'Sub Kegiatan': k.sub_kegiatan||'', 'Tgl Mulai': k.tanggal_penanganan||'', 'Tgl Selesai': k.tanggal_selesai||'',
+        'Biaya': k.biaya||0, 'Status': k.status_pekerjaan, 'Sumber Dana': k.sumber_dana||'',
+      })), 'sijalan_kegiatan_penanganan', 'Kegiatan'),
+      ()=>exportPdfTabel('Kegiatan Penanganan Jalan', [
+        {header:'Ruas', key:'kode_ruas'}, {header:'Jenis', key:'jenis_penanganan'}, {header:'Sub Kegiatan', key:'sub_kegiatan'},
+        {header:'Mulai', key:'tanggal_penanganan'}, {header:'Selesai', key:'tanggal_selesai'}, {header:'Biaya', key:'biaya'}, {header:'Status', key:'status_pekerjaan'},
+      ], kegiatan, 'sijalan_kegiatan_penanganan'));
   }catch(err){ v.innerHTML = errorPanel(err); }
 }
 
@@ -1759,8 +1998,11 @@ async function viewAnggaran(){
   try{
     const rekap = await api.rekapAnggaran();
     v.innerHTML = `
-    <div class="mb-5"><h1 class="font-display font-extrabold text-2xl text-ink-900">Anggaran &amp; Realisasi</h1>
-    <p class="text-ink-500 text-[13.5px]">Rekap pagu dan realisasi anggaran penanganan jalan per tahun</p></div>
+    <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+      <div><h1 class="font-display font-extrabold text-2xl text-ink-900">Anggaran &amp; Realisasi</h1>
+      <p class="text-ink-500 text-[13.5px]">Rekap pagu dan realisasi anggaran penanganan jalan per tahun</p></div>
+      <div id="anggaran-export"></div>
+    </div>
     <div class="card p-5 mb-5"><div style="height:300px"><canvas id="chart-angg-detail"></canvas></div></div>
     <div class="card overflow-x-auto">
       <table><thead><tr><th>Tahun</th><th>Sumber Dana</th><th>Pagu</th><th>Realisasi</th><th>% Realisasi</th></tr></thead>
@@ -1771,6 +2013,12 @@ async function viewAnggaran(){
         : `<tr><td colspan="5" class="text-center text-ink-400 py-8">Belum ada data anggaran tahunan.</td></tr>`}
       </tbody></table>
     </div>`;
+    document.getElementById('anggaran-export').innerHTML = exportButtons();
+    wireExportButtons(document.getElementById('anggaran-export'),
+      ()=>exportExcel(rekap.map(r=>({ 'Tahun': r.tahun, 'Sumber Dana': r.sumber_dana||'', 'Pagu': r.total_pagu||0, 'Realisasi': r.total_realisasi||0, '% Realisasi': r.persen_realisasi||0 })), 'sijalan_anggaran', 'Anggaran'),
+      ()=>exportPdfTabel('Anggaran & Realisasi', [
+        {header:'Tahun', key:'tahun'}, {header:'Sumber Dana', key:'sumber_dana'}, {header:'Pagu', key:'total_pagu'}, {header:'Realisasi', key:'total_realisasi'}, {header:'% Realisasi', key:'persen_realisasi'},
+      ], rekap, 'sijalan_anggaran'));
     if(rekap.length){
       const tahunList = [...new Set(rekap.map(r=>r.tahun))].sort();
       mkChart('chart-angg-detail','line',{labels:tahunList, datasets:[
@@ -1958,13 +2206,14 @@ const ASET_TABS = [
   {id:'jembatan', label:'Jembatan'},
   {id:'drainase', label:'Drainase'},
   {id:'perlengkapan', label:'Perlengkapan Jalan'},
+  {id:'lalulintas', label:'Data Lalu Lintas'},
 ];
 async function viewAset(){
   if(!state.asetTab) state.asetTab = 'jembatan';
   const v = document.getElementById('view');
   v.innerHTML = `
     <div class="mb-4"><h1 class="font-display font-extrabold text-2xl text-ink-900">Aset Pendukung Jalan</h1>
-    <p class="text-ink-500 text-[13.5px]">Data jembatan, drainase, dan perlengkapan jalan pada seluruh ruas</p></div>
+    <p class="text-ink-500 text-[13.5px]">Data jembatan, drainase, perlengkapan, dan lalu lintas pada seluruh ruas</p></div>
     <div class="flex gap-1 mb-4 border-b border-line">
       ${ASET_TABS.map(t=>`<button data-aset-tab="${t.id}" class="px-4 py-2.5 text-[13px] font-semibold -mb-px border-b-2 ${state.asetTab===t.id?'text-navy-700 border-navy-700':'text-ink-400 border-transparent'}">${t.label}</button>`).join('')}
     </div>
@@ -1972,7 +2221,8 @@ async function viewAset(){
   v.querySelectorAll('[data-aset-tab]').forEach(btn=>btn.addEventListener('click', ()=>{ state.asetTab = btn.dataset.asetTab; viewAset(); }));
   if(state.asetTab==='jembatan') renderJembatanTab();
   else if(state.asetTab==='drainase') renderDrainaseTab();
-  else renderPerlengkapanTab();
+  else if(state.asetTab==='perlengkapan') renderPerlengkapanTab();
+  else renderLalulintasTab();
 }
 
 async function loadSegmenOptionsInto(selectEl, ruasId, selectedSegId){
@@ -2282,6 +2532,153 @@ function openPerlengkapanFormModal(ruasList, editData=null, onSaved=null){
       if(onSaved) onSaved();
     }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
   });
+}
+
+// --- Data Lalu Lintas (LHR) ---
+async function renderLalulintasTab(){
+  const box = document.getElementById('aset-body');
+  try{
+    const [data, ruas] = await Promise.all([api.lalulintasList(), api.ruasList()]);
+    state.ruasCache = ruas;
+    box.innerHTML = `
+    <div class="flex justify-end gap-2 mb-3">
+      <div id="lalin-export"></div>
+      ${isEditor()?`<button id="btn-add-lalin" class="btn-accent">+ Tambah Data Lalu Lintas</button>`:''}
+    </div>
+    <div class="card overflow-x-auto">
+      <table><thead><tr><th>Ruas</th><th>Segmen</th><th>Tahun</th><th>LHR (smp/hari)</th><th>Kend. Ringan</th><th>Kend. Berat</th><th>Sepeda Motor</th><th>Sumber</th>${isEditor()?'<th></th>':''}</tr></thead>
+      <tbody>${data.length? data.map(l=>`
+        <tr data-id="${l.id}">
+          <td>${l.segmen_jalan?.ruas_jalan? `${l.segmen_jalan.ruas_jalan.kode_ruas} — ${l.segmen_jalan.ruas_jalan.nama_ruas}`:'—'}</td>
+          <td class="font-mono text-[12.5px]">${l.segmen_jalan?.kode_segmen||'—'}</td>
+          <td class="font-mono font-semibold">${l.tahun}</td>
+          <td class="font-mono">${fmtNum(l.lhr,1)}</td>
+          <td class="font-mono">${fmtNum(l.kendaraan_ringan,1)}</td>
+          <td class="font-mono">${fmtNum(l.kendaraan_berat,1)}</td>
+          <td class="font-mono">${fmtNum(l.sepeda_motor,1)}</td>
+          <td class="text-ink-500 text-[12.5px]">${l.sumber_data||'—'}</td>
+          ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
+        </tr>`).join('') : `<tr><td colspan="9" class="text-center text-ink-400 py-8">Belum ada data lalu lintas.</td></tr>`}
+      </tbody></table>
+    </div>`;
+    document.getElementById('lalin-export').innerHTML = exportButtons();
+    wireExportButtons(document.getElementById('lalin-export'),
+      ()=>exportExcel(data.map(l=>({
+        'Kode Ruas': l.segmen_jalan?.ruas_jalan?.kode_ruas||'', 'Nama Ruas': l.segmen_jalan?.ruas_jalan?.nama_ruas||'', 'Segmen': l.segmen_jalan?.kode_segmen||'',
+        'Tahun': l.tahun, 'LHR': l.lhr||0, 'Kendaraan Ringan': l.kendaraan_ringan||0, 'Kendaraan Berat': l.kendaraan_berat||0, 'Sepeda Motor': l.sepeda_motor||0, 'Sumber Data': l.sumber_data||'',
+      })), 'sijalan_lalu_lintas', 'Lalu Lintas'),
+      ()=>exportPdfTabel('Data Lalu Lintas', [
+        {header:'Segmen', key:'kode_segmen_flat'}, {header:'Tahun', key:'tahun'}, {header:'LHR', key:'lhr'}, {header:'Ringan', key:'kendaraan_ringan'}, {header:'Berat', key:'kendaraan_berat'}, {header:'Motor', key:'sepeda_motor'},
+      ], data.map(l=>({...l, kode_segmen_flat: l.segmen_jalan?.kode_segmen||'—'})), 'sijalan_lalu_lintas'));
+    if(isEditor()){
+      document.getElementById('btn-add-lalin').addEventListener('click', ()=>openLalulintasFormModal(ruas, null, renderLalulintasTab));
+      box.querySelectorAll('tr[data-id]').forEach(tr=>{
+        const l = data.find(x=>x.id===tr.dataset.id);
+        tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openLalulintasFormModal(ruas, l, renderLalulintasTab));
+        tr.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
+          if(!(await confirmDelete('Hapus data lalu lintas ini?'))) return;
+          try{ await api.deleteLalulintas(l.id); renderLalulintasTab(); }catch(err){ alert('Gagal menghapus: '+err.message); }
+        });
+      });
+    }
+  }catch(err){ box.innerHTML = errorPanel(err); }
+}
+function openLalulintasFormModal(ruasList, editData=null, onSaved=null){
+  const isEdit = !!editData;
+  const overlay = openModal(`
+    <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
+    <h3 class="font-display font-extrabold text-lg mb-4">${isEdit?'Ubah Data Lalu Lintas':'Tambah Data Lalu Lintas'}</h3>
+    <form id="form-lalin" class="space-y-3">
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Ruas Jalan *</label>
+        <select id="ll-ruas" required><option value="">Pilih ruas…</option>${(ruasList||[]).map(r=>`<option value="${r.id}">${r.kode_ruas} — ${r.nama_ruas}</option>`).join('')}</select></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Segmen *</label><select id="ll-segmen" required><option value="">Pilih ruas terlebih dahulu…</option></select></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Tahun *</label><input id="ll-tahun" type="number" required min="2000" max="2100" value="${editData?.tahun??new Date().getFullYear()}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">LHR (smp/hari)</label><input id="ll-lhr" type="number" step="0.01" value="${editData?.lhr??''}"></div>
+      </div>
+      <div class="grid grid-cols-3 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Kend. Ringan</label><input id="ll-ringan" type="number" step="0.01" value="${editData?.kendaraan_ringan??''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Kend. Berat</label><input id="ll-berat" type="number" step="0.01" value="${editData?.kendaraan_berat??''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Sepeda Motor</label><input id="ll-motor" type="number" step="0.01" value="${editData?.sepeda_motor??''}"></div>
+      </div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Sumber Data</label><input id="ll-sumber" value="${editData?.sumber_data||''}" placeholder="mis. Survei manual, alat penghitung otomatis…"></div>
+      <div id="ll-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
+      <button type="submit" class="btn-primary w-full">${isEdit?'Simpan Perubahan':'Simpan Data Lalu Lintas'}</button>
+    </form>`);
+  overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+  overlay.querySelector('#ll-ruas').addEventListener('change', (e)=>loadSegmenOptionsInto(overlay.querySelector('#ll-segmen'), e.target.value, null));
+  if(editData?.segmen_jalan?.ruas_jalan){
+    const ruasId = ruasList.find(r=>r.kode_ruas===editData.segmen_jalan.ruas_jalan.kode_ruas)?.id;
+    if(ruasId){ overlay.querySelector('#ll-ruas').value = ruasId; loadSegmenOptionsInto(overlay.querySelector('#ll-segmen'), ruasId, editData.segmen_id); }
+  }
+  overlay.querySelector('#form-lalin').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const errBox = overlay.querySelector('#ll-err');
+    const payload = {
+      segmen_id: overlay.querySelector('#ll-segmen').value,
+      tahun: overlay.querySelector('#ll-tahun').value,
+      lhr: overlay.querySelector('#ll-lhr').value || null,
+      kendaraan_ringan: overlay.querySelector('#ll-ringan').value || null,
+      kendaraan_berat: overlay.querySelector('#ll-berat').value || null,
+      sepeda_motor: overlay.querySelector('#ll-motor').value || null,
+      sumber_data: overlay.querySelector('#ll-sumber').value || null,
+    };
+    if(!payload.segmen_id){ errBox.textContent='Pilih ruas dan segmen terlebih dahulu.'; errBox.classList.remove('hidden'); return; }
+    try{
+      if(isEdit){ await api.updateLalulintas(editData.id, payload); } else { await api.insertLalulintas(payload); }
+      overlay.remove();
+      if(onSaved) onSaved();
+    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
+  });
+}
+
+// --- 13c. VIEW: LOG AKTIVITAS (audit, khusus admin) ------------------------
+const AUDIT_AKSI_LABEL = {insert:'Tambah', update:'Ubah', delete:'Hapus'};
+const AUDIT_TABEL_LABEL = {survei_kondisi:'Survei Kondisi', anggaran_tahunan:'Anggaran Tahunan', penanganan:'Kegiatan Penanganan'};
+function ringkasPerubahan(lama, baru){
+  if(!lama) return 'Data baru ditambahkan.';
+  if(!baru) return 'Data dihapus.';
+  const keys = new Set([...Object.keys(lama||{}), ...Object.keys(baru||{})]);
+  const skip = new Set(['id','created_at','updated_at']);
+  const perubahan = [];
+  keys.forEach(k=>{
+    if(skip.has(k)) return;
+    const a = lama?.[k], b = baru?.[k];
+    if(JSON.stringify(a) !== JSON.stringify(b)) perubahan.push(`${k}: ${a??'—'} → ${b??'—'}`);
+  });
+  return perubahan.length? perubahan.slice(0,4).join(' · ') + (perubahan.length>4?' …':'') : 'Tidak ada perubahan nilai.';
+}
+async function viewLogAktivitas(){
+  const v = document.getElementById('view');
+  if(!isAdmin()){ v.innerHTML = `<div class="card p-8 text-center text-ink-400">Halaman ini khusus administrator.</div>`; return; }
+  v.innerHTML = `<div class="skel h-96 w-full"></div>`;
+  try{
+    const logs = await api.auditLog(300);
+    v.innerHTML = `
+    <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+      <div><h1 class="font-display font-extrabold text-2xl text-ink-900">Log Aktivitas</h1>
+      <p class="text-ink-500 text-[13.5px]">Jejak audit perubahan data Survei Kondisi, Anggaran, dan Kegiatan Penanganan (300 terbaru)</p></div>
+      <div id="audit-export"></div>
+    </div>
+    <div class="card overflow-x-auto">
+      <table><thead><tr><th>Waktu</th><th>Tabel</th><th>Aksi</th><th>Oleh</th><th>Ringkasan Perubahan</th></tr></thead>
+      <tbody>${logs.length? logs.map(l=>`
+        <tr>
+          <td class="font-mono text-[12px] whitespace-nowrap">${new Date(l.created_at).toLocaleString('id-ID')}</td>
+          <td>${AUDIT_TABEL_LABEL[l.tabel]||l.tabel}</td>
+          <td><span class="badge ${l.aksi==='delete'?'badge-rusak_berat':l.aksi==='insert'?'badge-baik':'badge-sedang'}">${AUDIT_AKSI_LABEL[l.aksi]||l.aksi}</span></td>
+          <td class="text-[12.5px]">${l.actor_nama||'Sistem'}</td>
+          <td class="text-[12.5px] text-ink-600 max-w-[420px]">${ringkasPerubahan(l.data_lama, l.data_baru)}</td>
+        </tr>`).join('') : `<tr><td colspan="5" class="text-center text-ink-400 py-8">Belum ada aktivitas tercatat.</td></tr>`}
+      </tbody></table>
+    </div>`;
+    document.getElementById('audit-export').innerHTML = exportButtons();
+    wireExportButtons(document.getElementById('audit-export'),
+      ()=>exportExcel(logs.map(l=>({ 'Waktu': l.created_at, 'Tabel': AUDIT_TABEL_LABEL[l.tabel]||l.tabel, 'Aksi': AUDIT_AKSI_LABEL[l.aksi]||l.aksi, 'Oleh': l.actor_nama||'Sistem', 'Ringkasan': ringkasPerubahan(l.data_lama, l.data_baru) })), 'sijalan_log_aktivitas', 'Log Aktivitas'),
+      ()=>exportPdfTabel('Log Aktivitas', [
+        {header:'Waktu', key:'created_at'}, {header:'Tabel', key:'tabel_label'}, {header:'Aksi', key:'aksi_label'}, {header:'Oleh', key:'actor_nama'}, {header:'Ringkasan', key:'ringkasan'},
+      ], logs.map(l=>({ created_at: new Date(l.created_at).toLocaleString('id-ID'), tabel_label: AUDIT_TABEL_LABEL[l.tabel]||l.tabel, aksi_label: AUDIT_AKSI_LABEL[l.aksi]||l.aksi, actor_nama: l.actor_nama||'Sistem', ringkasan: ringkasPerubahan(l.data_lama, l.data_baru) })), 'sijalan_log_aktivitas'));
+  }catch(err){ v.innerHTML = errorPanel(err); }
 }
 
 // --- 14. VIEW: ADMIN (Pengguna) -------------------------------------------
