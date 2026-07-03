@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -506,6 +505,7 @@ const api = {
   // --- kondisi / survei ---
   async kondisiTerkini(){ const {data,error} = await sb.from('v_kondisi_terkini').select('*'); if(error) throw error; return data; },
   async rekapKondisiKabupaten(){ const {data,error} = await sb.from('v_rekap_kondisi_kabupaten').select('*'); if(error) throw error; return data; },
+  async skorPrioritas(limit=10){ const {data,error} = await sb.from('v_skor_prioritas').select('*').order('skor_prioritas',{ascending:false}).limit(limit); if(error) throw error; return data; },
   async insertSurvei(payload){ const {error} = await sb.from('survei_kondisi').insert(payload); if(error) throw error; },
   async updateSurvei(id, payload){ const {error} = await sb.from('survei_kondisi').update(payload).eq('id',id); if(error) throw error; },
   async deleteSurvei(id){ const {error} = await sb.from('survei_kondisi').delete().eq('id',id); if(error) throw error; },
@@ -808,8 +808,8 @@ async function viewDashboard(){
     <div class="grid lg:grid-cols-2 gap-5"><div class="skel h-80"></div><div class="skel h-80"></div></div>
   </div>`;
   try{
-    const [ruas, kabupaten, rekapKondisi, rekapAnggaran, rekapAnggaranKab] = await Promise.all([
-      api.ruasList(), api.kabupaten(), api.rekapKondisiKabupaten(), api.rekapAnggaran(), api.rekapAnggaranKabupaten()
+    const [ruas, kabupaten, rekapKondisi, rekapAnggaran, rekapAnggaranKab, skorPrioritas] = await Promise.all([
+      api.ruasList(), api.kabupaten(), api.rekapKondisiKabupaten(), api.rekapAnggaran(), api.rekapAnggaranKabupaten(), api.skorPrioritas(10).catch(()=>[])
     ]);
     state.ruasCache = ruas; state.kabupatenList = kabupaten;
 
@@ -870,6 +870,36 @@ async function viewDashboard(){
         <span class="font-mono text-[11px] text-ink-400">% realisasi terhadap pagu</span>
       </div>
       <div style="height:340px"><canvas id="chart-anggaran-kab"></canvas></div>
+    </div>
+
+    <div class="card p-5 mt-5">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-display font-bold text-[15px]">Ruas Prioritas Penanganan</h3>
+        <span class="font-mono text-[11px] text-ink-400">Skor gabungan kondisi + LHR + bencana 24 bln</span>
+      </div>
+      ${!skorPrioritas.length ? `<p class="text-[13px] text-ink-500">Belum ada data skor prioritas. Pastikan migrasi <code class="font-mono text-[11.5px]">v_skor_prioritas</code> sudah dijalankan di Supabase dan sudah ada data survei kondisi.</p>` : `
+      <div class="space-y-2.5">
+        ${skorPrioritas.map((r,i)=>`
+          <div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-ink-50 transition">
+            <span class="font-display font-extrabold text-[13px] text-ink-400 w-5 text-center">${i+1}</span>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-semibold text-[13.5px] text-ink-800 truncate">${r.nama_ruas||'-'}</span>
+                <span class="font-mono text-[10.5px] text-ink-400">${r.kode_ruas||''}</span>
+                ${badge(r.kondisi)}
+              </div>
+              <div class="text-[11.5px] text-ink-500 mt-0.5">
+                ${r.lhr!=null ? `LHR ${fmtNum(r.lhr)} smp/hari (${r.tahun_lhr})` : 'LHR belum tercatat'}
+                ${r.jumlah_bencana_24bln>0 ? ` · ${r.jumlah_bencana_24bln} kejadian bencana 24 bln` : ''}
+              </div>
+            </div>
+            <div class="text-right shrink-0">
+              <div class="font-display font-extrabold text-[17px]" style="color:${r.skor_prioritas>=70?'#C43D3D':r.skor_prioritas>=40?'#E0672B':'#2E8B57'}">${fmtNum(r.skor_prioritas,1)}</div>
+              <div class="text-[10px] text-ink-400 -mt-0.5">skor</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>`}
     </div>`;
 
     // Chart: kondisi per kabupaten (stacked bar)
