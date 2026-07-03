@@ -1785,19 +1785,20 @@ async function renderJembatanTab(){
     box.innerHTML = `
     <div class="flex justify-end mb-3">${isEditor()?`<button id="btn-add-jembatan" class="btn-accent">+ Tambah Jembatan</button>`:''}</div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th>Nama Jembatan</th><th>Ruas</th><th>STA</th><th>Panjang (m)</th><th>Lebar (m)</th><th>Konstruksi</th><th>Kondisi</th><th>Tahun</th>${isEditor()?'<th></th>':''}</tr></thead>
+      <table><thead><tr><th>Nama Jembatan</th><th>Ruas</th><th>STA Awal</th><th>STA Akhir</th><th>Panjang (m)</th><th>Lebar (m)</th><th>Konstruksi</th><th>Kondisi</th><th>Tahun</th>${isEditor()?'<th></th>':''}</tr></thead>
       <tbody>${data.length? data.map(j=>`
         <tr data-id="${j.id}">
           <td class="font-medium">${j.nama_jembatan}</td>
           <td>${j.ruas_jalan?`${j.ruas_jalan.kode_ruas} — ${j.ruas_jalan.nama_ruas}`:'—'}</td>
-          <td class="font-mono">${j.sta!=null?fmtNum(j.sta,3):'—'}</td>
+          <td class="font-mono">${j.sta_awal!=null?fmtNum(j.sta_awal,3):'—'}</td>
+          <td class="font-mono">${j.sta_akhir!=null?fmtNum(j.sta_akhir,3):'—'}</td>
           <td class="font-mono">${fmtNum(j.panjang_m,1)}</td>
           <td class="font-mono">${fmtNum(j.lebar_m,1)}</td>
           <td>${j.jenis_konstruksi||'—'}</td>
           <td>${badge(j.kondisi)}</td>
           <td class="font-mono">${j.tahun_dibangun||'—'}</td>
           ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
-        </tr>`).join('') : `<tr><td colspan="9" class="text-center text-ink-400 py-8">Belum ada data jembatan.</td></tr>`}
+        </tr>`).join('') : `<tr><td colspan="10" class="text-center text-ink-400 py-8">Belum ada data jembatan.</td></tr>`}
       </tbody></table>
     </div>`;
     if(isEditor()){
@@ -1822,8 +1823,9 @@ function openJembatanFormModal(ruasList, editData=null, onSaved=null){
       <div><label class="text-[12.5px] font-semibold text-ink-600">Ruas Jalan *</label>
         <select id="jb-ruas" required><option value="">Pilih ruas…</option>${(ruasList||[]).map(r=>`<option value="${r.id}" ${editData?.ruas_id===r.id?'selected':''}>${r.kode_ruas} — ${r.nama_ruas}</option>`).join('')}</select></div>
       <div><label class="text-[12.5px] font-semibold text-ink-600">Nama Jembatan *</label><input id="jb-nama" required value="${editData?.nama_jembatan||''}"></div>
-      <div class="grid grid-cols-3 gap-3">
-        <div><label class="text-[12.5px] font-semibold text-ink-600">STA</label><input id="jb-sta" type="number" step="0.001" value="${editData?.sta??''}"></div>
+      <div class="grid grid-cols-4 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">STA Awal</label><input id="jb-sta-awal" type="number" step="0.001" value="${editData?.sta_awal??''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">STA Akhir</label><input id="jb-sta-akhir" type="number" step="0.001" value="${editData?.sta_akhir??''}"></div>
         <div><label class="text-[12.5px] font-semibold text-ink-600">Panjang (m)</label><input id="jb-panjang" type="number" step="0.01" value="${editData?.panjang_m??''}"></div>
         <div><label class="text-[12.5px] font-semibold text-ink-600">Lebar (m)</label><input id="jb-lebar" type="number" step="0.01" value="${editData?.lebar_m??''}"></div>
       </div>
@@ -1849,7 +1851,8 @@ function openJembatanFormModal(ruasList, editData=null, onSaved=null){
     const payload = {
       ruas_id: overlay.querySelector('#jb-ruas').value,
       nama_jembatan: overlay.querySelector('#jb-nama').value,
-      sta: overlay.querySelector('#jb-sta').value || null,
+      sta_awal: overlay.querySelector('#jb-sta-awal').value || null,
+      sta_akhir: overlay.querySelector('#jb-sta-akhir').value || null,
       panjang_m: overlay.querySelector('#jb-panjang').value || null,
       lebar_m: overlay.querySelector('#jb-lebar').value || null,
       jenis_konstruksi: overlay.querySelector('#jb-konstruksi').value || null,
@@ -1874,17 +1877,19 @@ async function renderDrainaseTab(){
     box.innerHTML = `
     <div class="flex justify-end mb-3">${isEditor()?`<button id="btn-add-drainase" class="btn-accent">+ Tambah Drainase</button>`:''}</div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th>Ruas</th><th>Segmen</th><th>Jenis</th><th>Sisi</th><th>Panjang (m)</th><th>Kondisi</th>${isEditor()?'<th></th>':''}</tr></thead>
+      <table><thead><tr><th>Ruas</th><th>Segmen</th><th>Jenis</th><th>Sisi</th><th>STA Awal</th><th>STA Akhir</th><th>Panjang (m)</th><th>Kondisi</th>${isEditor()?'<th></th>':''}</tr></thead>
       <tbody>${data.length? data.map(d=>`
         <tr data-id="${d.id}">
           <td>${d.segmen_jalan?.ruas_jalan? `${d.segmen_jalan.ruas_jalan.kode_ruas} — ${d.segmen_jalan.ruas_jalan.nama_ruas}`:'—'}</td>
           <td class="font-mono text-[12.5px]">${d.segmen_jalan?.kode_segmen||'—'}</td>
           <td class="capitalize">${(d.jenis||'—').replaceAll('_',' ')}</td>
           <td class="capitalize">${d.sisi||'—'}</td>
+          <td class="font-mono">${d.sta_awal!=null?fmtNum(d.sta_awal,3):'—'}</td>
+          <td class="font-mono">${d.sta_akhir!=null?fmtNum(d.sta_akhir,3):'—'}</td>
           <td class="font-mono">${fmtNum(d.panjang_m,1)}</td>
           <td>${badge(d.kondisi)}</td>
           ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
-        </tr>`).join('') : `<tr><td colspan="7" class="text-center text-ink-400 py-8">Belum ada data drainase.</td></tr>`}
+        </tr>`).join('') : `<tr><td colspan="9" class="text-center text-ink-400 py-8">Belum ada data drainase.</td></tr>`}
       </tbody></table>
     </div>`;
     if(isEditor()){
@@ -1925,6 +1930,10 @@ function openDrainaseFormModal(ruasList, editData=null, onSaved=null){
           </select></div>
       </div>
       <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">STA Awal</label><input id="dr-sta-awal" type="number" step="0.001" value="${editData?.sta_awal??''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">STA Akhir</label><input id="dr-sta-akhir" type="number" step="0.001" value="${editData?.sta_akhir??''}"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
         <div><label class="text-[12.5px] font-semibold text-ink-600">Panjang (m)</label><input id="dr-panjang" type="number" step="0.01" value="${editData?.panjang_m??''}"></div>
         <div><label class="text-[12.5px] font-semibold text-ink-600">Kondisi</label>
           <select id="dr-kondisi">
@@ -1952,6 +1961,8 @@ function openDrainaseFormModal(ruasList, editData=null, onSaved=null){
       segmen_id: overlay.querySelector('#dr-segmen').value,
       jenis: getJenisDrainase(),
       sisi: overlay.querySelector('#dr-sisi').value,
+      sta_awal: overlay.querySelector('#dr-sta-awal').value || null,
+      sta_akhir: overlay.querySelector('#dr-sta-akhir').value || null,
       panjang_m: overlay.querySelector('#dr-panjang').value || null,
       kondisi: overlay.querySelector('#dr-kondisi').value || null,
     };
@@ -1973,17 +1984,18 @@ async function renderPerlengkapanTab(){
     box.innerHTML = `
     <div class="flex justify-end mb-3">${isEditor()?`<button id="btn-add-perlengkapan" class="btn-accent">+ Tambah Perlengkapan</button>`:''}</div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th>Ruas</th><th>Segmen</th><th>Jenis</th><th>STA</th><th>Jumlah</th><th>Kondisi</th>${isEditor()?'<th></th>':''}</tr></thead>
+      <table><thead><tr><th>Ruas</th><th>Segmen</th><th>Jenis</th><th>STA Awal</th><th>STA Akhir</th><th>Jumlah</th><th>Kondisi</th>${isEditor()?'<th></th>':''}</tr></thead>
       <tbody>${data.length? data.map(p=>`
         <tr data-id="${p.id}">
           <td>${p.segmen_jalan?.ruas_jalan? `${p.segmen_jalan.ruas_jalan.kode_ruas} — ${p.segmen_jalan.ruas_jalan.nama_ruas}`:'—'}</td>
           <td class="font-mono text-[12.5px]">${p.segmen_jalan?.kode_segmen||'—'}</td>
           <td class="capitalize">${(p.jenis||'—').replaceAll('_',' ')}</td>
-          <td class="font-mono">${p.sta!=null?fmtNum(p.sta,3):'—'}</td>
+          <td class="font-mono">${p.sta_awal!=null?fmtNum(p.sta_awal,3):'—'}</td>
+          <td class="font-mono">${p.sta_akhir!=null?fmtNum(p.sta_akhir,3):'—'}</td>
           <td class="font-mono">${p.jumlah??'—'}</td>
           <td>${badge(p.kondisi)}</td>
           ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
-        </tr>`).join('') : `<tr><td colspan="7" class="text-center text-ink-400 py-8">Belum ada data perlengkapan jalan.</td></tr>`}
+        </tr>`).join('') : `<tr><td colspan="8" class="text-center text-ink-400 py-8">Belum ada data perlengkapan jalan.</td></tr>`}
       </tbody></table>
     </div>`;
     if(isEditor()){
@@ -2018,7 +2030,10 @@ function openPerlengkapanFormModal(ruasList, editData=null, onSaved=null){
             <option value="patok_km" ${editData?.jenis==='patok_km'?'selected':''}>Patok KM</option>
             <option value="lainnya">Lainnya (isi manual)</option>
           </select><input id="pl-jenis-lainnya" class="hidden mt-2" placeholder="Tuliskan jenis perlengkapan…"></div>
-        <div><label class="text-[12.5px] font-semibold text-ink-600">STA</label><input id="pl-sta" type="number" step="0.001" value="${editData?.sta??''}"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">STA Awal</label><input id="pl-sta-awal" type="number" step="0.001" value="${editData?.sta_awal??''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">STA Akhir</label><input id="pl-sta-akhir" type="number" step="0.001" value="${editData?.sta_akhir??''}"></div>
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div><label class="text-[12.5px] font-semibold text-ink-600">Jumlah</label><input id="pl-jumlah" type="number" min="1" value="${editData?.jumlah??1}"></div>
@@ -2047,7 +2062,8 @@ function openPerlengkapanFormModal(ruasList, editData=null, onSaved=null){
     const payload = {
       segmen_id: overlay.querySelector('#pl-segmen').value,
       jenis: getJenisPerlengkapan(),
-      sta: overlay.querySelector('#pl-sta').value || null,
+      sta_awal: overlay.querySelector('#pl-sta-awal').value || null,
+      sta_akhir: overlay.querySelector('#pl-sta-akhir').value || null,
       jumlah: overlay.querySelector('#pl-jumlah').value || 1,
       kondisi: overlay.querySelector('#pl-kondisi').value || null,
     };
