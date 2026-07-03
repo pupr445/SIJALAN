@@ -84,10 +84,13 @@ const state = {
 const KONDISI_LABEL = {baik:'Baik', sedang:'Sedang', rusak_ringan:'Rusak Ringan', rusak_berat:'Rusak Berat'};
 const KONDISI_ORDER = ['rusak_berat','rusak_ringan','sedang','baik'];
 const KONDISI_COLOR = {baik:'#2E8B57', sedang:'#E8A33D', rusak_ringan:'#E0672B', rusak_berat:'#C43D3D'};
+const PENUGASAN_STATUS_LABEL = {belum_disurvei:'Belum Disurvei', sedang_disurvei:'Sedang Disurvei', selesai:'Selesai'};
+const PENUGASAN_STATUS_COLOR = {belum_disurvei:'#8896AC', sedang_disurvei:'#E8A33D', selesai:'#2E8B57'};
 const ROLE_LABEL = {admin:'Administrator', kepala_bidang:'Kepala Bidang', petugas_lapangan:'Petugas Lapangan', viewer:'Peninjau'};
 
 function isEditor(){ return state.profile && ['admin','kepala_bidang','petugas_lapangan'].includes(state.profile.role); }
 function isAdmin(){ return state.profile && state.profile.role === 'admin'; }
+function isPenugas(){ return state.profile && ['admin','kepala_bidang'].includes(state.profile.role); }
 function fmtNum(n, d=0){ if(n===null||n===undefined) return '—'; return Number(n).toLocaleString('id-ID',{maximumFractionDigits:d}); }
 function fmtRp(n){ if(n===null||n===undefined) return '—'; return 'Rp ' + Number(n).toLocaleString('id-ID',{maximumFractionDigits:0}); }
 function fmtDate(d){ if(!d) return '—'; return new Date(d).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}); }
@@ -309,10 +312,18 @@ const api = {
 
   // --- anggaran ---
   async rekapAnggaran(){ const {data,error} = await sb.from('v_rekap_anggaran_tahun').select('*'); if(error) throw error; return data; },
+  async rekapAnggaranKabupaten(){ const {data,error} = await sb.from('v_rekap_anggaran_kabupaten').select('*'); if(error) throw error; return data; },
   async anggaranByRuas(ruasId){ const {data,error} = await sb.from('anggaran_tahunan').select('*').eq('ruas_id',ruasId).order('tahun',{ascending:false}); if(error) throw error; return data; },
   async insertAnggaran(payload){ const {error} = await sb.from('anggaran_tahunan').insert(payload); if(error) throw error; },
   async updateAnggaran(id, payload){ const {error} = await sb.from('anggaran_tahunan').update(payload).eq('id',id); if(error) throw error; },
   async deleteAnggaran(id){ const {error} = await sb.from('anggaran_tahunan').delete().eq('id',id); if(error) throw error; },
+
+  // --- penugasan survei ---
+  async penugasanList(){ const {data,error} = await sb.from('v_penugasan_survei').select('*'); if(error) throw error; return data; },
+  async staffList(){ const {data,error} = await sb.from('profiles').select('*').eq('role','petugas_lapangan').order('nama'); if(error) throw error; return data; },
+  async insertPenugasan(payload){ const {error} = await sb.from('penugasan_survei').insert(payload); if(error) throw error; },
+  async updatePenugasan(id, payload){ const {error} = await sb.from('penugasan_survei').update(payload).eq('id',id); if(error) throw error; },
+  async deletePenugasan(id){ const {error} = await sb.from('penugasan_survei').delete().eq('id',id); if(error) throw error; },
 
   // --- kegiatan penanganan (terkoneksi langsung ke ruas_id) ---
   async kegiatanList(){ const {data,error} = await sb.from('v_kegiatan_penanganan').select('*').order('tanggal_penanganan',{ascending:false}); if(error) throw error; return data; },
@@ -386,6 +397,7 @@ const NAV_ITEMS = [
   {id:'dokumen', label:'Dokumen', icon:'doc'},
   {id:'aset', label:'Aset', icon:'bridge'},
   {id:'anggaran', label:'Anggaran', icon:'wallet'},
+  {id:'penugasan', label:'Penugasan Survei', icon:'clipboard'},
   {id:'bencana', label:'Kejadian Bencana', icon:'alert'},
 ];
 const ICONS = {
@@ -407,6 +419,7 @@ const ICONS = {
   pin:'<path d="M12 21s-7-6.5-7-11.5A7 7 0 0 1 19 9.5C19 14.5 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.3"/>',
   flag:'<path d="M5 3v18"/><path d="M5 4h11l-2.5 3.5L16 11H5"/>',
   image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M21 16l-5.5-5.5L4 21"/>',
+  clipboard:'<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1Z"/><path d="M8.5 11h7M8.5 14.5h7M8.5 18h4"/>',
 };
 function actionBtns({onEdit, onDelete, onDetail}={}){
   let html = '<div class="flex items-center gap-1.5" onclick="event.stopPropagation()">';
@@ -457,7 +470,7 @@ function renderShell(){
 }
 
 function routeView(){
-  const map = {dashboard:viewDashboard, peta:viewPeta, ruas:viewRuas, kegiatan:viewKegiatan, dokumen:viewDokumen, aset:viewAset, anggaran:viewAnggaran, bencana:viewBencana, admin:viewAdmin};
+  const map = {dashboard:viewDashboard, peta:viewPeta, ruas:viewRuas, kegiatan:viewKegiatan, dokumen:viewDokumen, aset:viewAset, anggaran:viewAnggaran, penugasan:viewPenugasan, bencana:viewBencana, admin:viewAdmin};
   (map[state.route]||viewDashboard)();
 }
 
@@ -535,8 +548,8 @@ async function viewDashboard(){
     <div class="grid lg:grid-cols-2 gap-5"><div class="skel h-80"></div><div class="skel h-80"></div></div>
   </div>`;
   try{
-    const [ruas, kabupaten, rekapKondisi, rekapAnggaran] = await Promise.all([
-      api.ruasList(), api.kabupaten(), api.rekapKondisiKabupaten(), api.rekapAnggaran()
+    const [ruas, kabupaten, rekapKondisi, rekapAnggaran, rekapAnggaranKab] = await Promise.all([
+      api.ruasList(), api.kabupaten(), api.rekapKondisiKabupaten(), api.rekapAnggaran(), api.rekapAnggaranKabupaten()
     ]);
     state.ruasCache = ruas; state.kabupatenList = kabupaten;
 
@@ -589,6 +602,14 @@ async function viewDashboard(){
         <h3 class="font-display font-bold text-[15px] mb-4">Realisasi Anggaran per Tahun</h3>
         <div style="height:320px"><canvas id="chart-anggaran"></canvas></div>
       </div>
+    </div>
+
+    <div class="card p-5 mt-5">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-display font-bold text-[15px]">Realisasi Anggaran per Kabupaten/Kota (${thisYear})</h3>
+        <span class="font-mono text-[11px] text-ink-400">% realisasi terhadap pagu</span>
+      </div>
+      <div style="height:340px"><canvas id="chart-anggaran-kab"></canvas></div>
     </div>`;
 
     // Chart: kondisi per kabupaten (stacked bar)
@@ -609,6 +630,19 @@ async function viewDashboard(){
       {label:'Pagu', backgroundColor:'#16385E', data:paguPerTahun, borderRadius:4},
       {label:'Realisasi', backgroundColor:'#F2A93B', data:realPerTahun, borderRadius:4},
     ]}, {scales:{y:{ticks:{callback:v=>fmtRp(v)}}}});
+
+    // Chart: realisasi anggaran per kabupaten/kota (tahun berjalan)
+    const anggaranKabNow = rekapAnggaranKab.filter(r=>r.tahun===thisYear).sort((a,b)=>Number(b.total_realisasi||0)-Number(a.total_realisasi||0));
+    mkChart('chart-anggaran-kab','bar',{
+      labels: anggaranKabNow.map(r=>r.kabupaten),
+      datasets:[
+        {label:'Pagu', backgroundColor:'#16385E', data:anggaranKabNow.map(r=>Number(r.total_pagu||0)), borderRadius:4},
+        {label:'Realisasi', backgroundColor:'#F2A93B', data:anggaranKabNow.map(r=>Number(r.total_realisasi||0)), borderRadius:4},
+      ]
+    }, {
+      indexAxis:'y',
+      scales:{x:{ticks:{callback:v=>fmtRp(v)}}, y:{ticks:{font:{size:10}}}}
+    });
 
     if(rekapKondisi.length===0 && rekapAnggaran.length===0){
       v.insertAdjacentHTML('beforeend', emptyStateNotice());
@@ -1697,6 +1731,132 @@ async function viewAnggaran(){
       ]}, {scales:{y:{ticks:{callback:v=>fmtRp(v)}}}});
     }
   }catch(err){ v.innerHTML = errorPanel(err); }
+}
+
+// --- 12b. VIEW: PENUGASAN SURVEI --------------------------------------------
+async function viewPenugasan(){
+  const v = document.getElementById('view');
+  v.innerHTML = `<div class="skel h-10 w-full mb-4"></div><div class="skel h-96 w-full"></div>`;
+  try{
+    const [penugasan, ruas, staf] = await Promise.all([api.penugasanList(), api.ruasList(), api.staffList()]);
+    v.innerHTML = `
+    <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+      <div><h1 class="font-display font-extrabold text-2xl text-ink-900">Penugasan Survei</h1>
+      <p class="text-ink-500 text-[13.5px]">Penugasan staf untuk survei kondisi ruas jalan &amp; pemantauan progresnya</p></div>
+      ${isPenugas()?`<button id="btn-add-penugasan" class="btn-accent">+ Tugaskan Survei</button>`:''}
+    </div>
+    <div class="flex flex-wrap gap-3 mb-4">
+      <input id="pn-search" placeholder="Cari ruas / nama staf…" class="max-w-xs">
+      <select id="pn-status" class="max-w-[200px]"><option value="">Semua Status</option>${Object.keys(PENUGASAN_STATUS_LABEL).map(s=>`<option value="${s}">${PENUGASAN_STATUS_LABEL[s]}</option>`).join('')}</select>
+      ${!isPenugas()?`<label class="flex items-center gap-2 text-[12.5px] text-ink-600"><input id="pn-mine" type="checkbox" class="!w-auto">Hanya tugas saya</label>`:''}
+    </div>
+    <div class="card overflow-x-auto">
+      <table><thead><tr><th>Ruas</th><th>Kab/Kota</th><th>Staf</th><th>Target</th><th>Status</th><th>Catatan</th>${isPenugas()?'<th>Aksi</th>':''}</tr></thead>
+      <tbody id="penugasan-tbody"></tbody></table>
+    </div>
+    <div id="penugasan-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Belum ada penugasan survei yang cocok dengan filter.</div>`;
+
+    function renderRows(){
+      const q = document.getElementById('pn-search').value.toLowerCase();
+      const st = document.getElementById('pn-status').value;
+      const mineEl = document.getElementById('pn-mine');
+      const mine = mineEl ? mineEl.checked : false;
+      const rows = penugasan.filter(p=>{
+        if(q && !((p.nama_ruas||'').toLowerCase().includes(q) || (p.kode_ruas||'').toLowerCase().includes(q) || (p.nama_petugas||'').toLowerCase().includes(q))) return false;
+        if(st && p.status !== st) return false;
+        if(mine && p.petugas_id !== state.user.id) return false;
+        return true;
+      });
+      const tbody = document.getElementById('penugasan-tbody');
+      tbody.innerHTML = rows.map(p=>{
+        const canUpdateStatus = isPenugas() || p.petugas_id === state.user.id;
+        return `
+        <tr data-id="${p.id}">
+          <td class="font-medium">${p.kode_ruas? `<span class="font-mono text-[12px] text-navy-700 font-semibold">${p.kode_ruas}</span> · `:''}${p.nama_ruas}</td>
+          <td class="text-ink-500">${p.kabupaten||'—'}</td>
+          <td>${p.nama_petugas}</td>
+          <td class="font-mono text-[12.5px]">${p.target_tanggal? fmtDate(p.target_tanggal) : '—'}</td>
+          <td>${canUpdateStatus? `
+            <select data-status-id="${p.id}" class="pn-status-select max-w-[170px]" style="border-color:${PENUGASAN_STATUS_COLOR[p.status]}">
+              ${Object.keys(PENUGASAN_STATUS_LABEL).map(s=>`<option value="${s}" ${p.status===s?'selected':''}>${PENUGASAN_STATUS_LABEL[s]}</option>`).join('')}
+            </select>` : `<span class="badge" style="background:${PENUGASAN_STATUS_COLOR[p.status]}22;color:${PENUGASAN_STATUS_COLOR[p.status]}">${PENUGASAN_STATUS_LABEL[p.status]}</span>`}
+          </td>
+          <td class="text-ink-500 text-[12.5px] max-w-[220px] truncate" title="${p.catatan||''}">${p.catatan||'—'}</td>
+          ${isPenugas()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
+        </tr>`;
+      }).join('');
+      document.getElementById('penugasan-empty').classList.toggle('hidden', rows.length>0);
+
+      tbody.querySelectorAll('.pn-status-select').forEach(sel=>sel.addEventListener('change', async ()=>{
+        try{ await api.updatePenugasan(sel.dataset.statusId, {status: sel.value}); const item = penugasan.find(x=>x.id===sel.dataset.statusId); if(item) item.status = sel.value; sel.style.borderColor = PENUGASAN_STATUS_COLOR[sel.value]; }
+        catch(err){ alert('Gagal memperbarui status: '+err.message); }
+      }));
+      tbody.querySelectorAll('[data-act="edit"]').forEach(btn=>btn.addEventListener('click', (e)=>{
+        const id = e.target.closest('tr').dataset.id;
+        openPenugasanFormModal(ruas, staf, penugasan.find(x=>x.id===id), ()=>viewPenugasan());
+      }));
+      tbody.querySelectorAll('[data-act="delete"]').forEach(btn=>btn.addEventListener('click', async (e)=>{
+        const id = e.target.closest('tr').dataset.id;
+        if(!(await confirmDelete('Hapus penugasan survei ini?'))) return;
+        try{ await api.deletePenugasan(id); viewPenugasan(); }catch(err){ alert('Gagal menghapus: '+err.message); }
+      }));
+    }
+    ['pn-search','pn-status'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    document.getElementById('pn-mine')?.addEventListener('change', renderRows);
+    renderRows();
+    if(isPenugas()){ document.getElementById('btn-add-penugasan').addEventListener('click', ()=>openPenugasanFormModal(ruas, staf, null, ()=>viewPenugasan())); }
+  }catch(err){ v.innerHTML = errorPanel(err); }
+}
+
+function openPenugasanFormModal(ruasList, stafList, editData=null, onSaved=null){
+  const isEdit = !!editData;
+  const overlay = openModal(`
+    <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
+    <h3 class="font-display font-extrabold text-lg mb-1">${isEdit?'Ubah Penugasan':'Tugaskan Survei'}</h3>
+    <p class="text-[13px] text-ink-500 mb-4">Pilih ruas jalan dan staf yang ditugaskan melakukan survei kondisi</p>
+    <form id="form-penugasan" class="space-y-3">
+      <div>
+        <label class="text-[12.5px] font-semibold text-ink-600">Ruas Jalan *</label>
+        <select id="pn-ruas" required ${isEdit?'disabled':''}>
+          <option value="">— Pilih ruas —</option>
+          ${ruasList.map(r=>`<option value="${r.id}" ${editData?.ruas_id===r.id?'selected':''}>${r.kode_ruas} · ${r.nama_ruas}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label class="text-[12.5px] font-semibold text-ink-600">Staf Petugas *</label>
+        <select id="pn-petugas" required>
+          <option value="">— Pilih staf —</option>
+          ${stafList.map(s=>`<option value="${s.id}" ${editData?.petugas_id===s.id?'selected':''}>${s.nama}</option>`).join('')}
+        </select>
+        ${stafList.length===0?`<p class="text-[11.5px] text-ink-400 mt-1">Belum ada staf berperan "Petugas Lapangan". Atur peran pengguna di menu Pengguna terlebih dahulu.</p>`:''}
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Target Tanggal</label><input id="pn-target" type="date" value="${editData?.target_tanggal||''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Status</label><select id="pn-status-input">${Object.keys(PENUGASAN_STATUS_LABEL).map(s=>`<option value="${s}" ${(editData?.status||'belum_disurvei')===s?'selected':''}>${PENUGASAN_STATUS_LABEL[s]}</option>`).join('')}</select></div>
+      </div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Catatan</label><textarea id="pn-catatan" rows="2" placeholder="Instruksi atau catatan tambahan…">${editData?.catatan||''}</textarea></div>
+      <div id="pn-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
+      <button type="submit" class="btn-primary w-full">${isEdit?'Simpan Perubahan':'Simpan Penugasan'}</button>
+    </form>`);
+  overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+  overlay.querySelector('#form-penugasan').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const errBox = overlay.querySelector('#pn-err');
+    const payload = {
+      ruas_id: editData?.ruas_id || overlay.querySelector('#pn-ruas').value,
+      petugas_id: overlay.querySelector('#pn-petugas').value,
+      target_tanggal: overlay.querySelector('#pn-target').value || null,
+      status: overlay.querySelector('#pn-status-input').value,
+      catatan: overlay.querySelector('#pn-catatan').value || null,
+    };
+    if(!isEdit) payload.ditugaskan_oleh = state.user.id;
+    try{
+      if(isEdit){ await api.updatePenugasan(editData.id, payload); }
+      else{ await api.insertPenugasan(payload); }
+      overlay.remove();
+      if(onSaved) onSaved();
+    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
+  });
 }
 
 // --- 13. VIEW: BENCANA -----------------------------------------------------
