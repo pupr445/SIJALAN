@@ -145,12 +145,60 @@ function wireGpsButton(btnEl, latInput, longInput, statusEl){
 
 // --- FOTO DOKUMENTASI (Supabase Storage bucket privat 'dokumentasi-jalan') ---
 const FOTO_BUCKET = 'dokumentasi-jalan';
+
+// --- KOMPRESI FOTO OTOMATIS SEBELUM DIUNGGAH -------------------------------
+// Foto dari kamera HP lapangan sering 3-8MB. Sebelum diunggah ke Supabase
+// Storage, foto diperkecil (resize sisi terpanjang) dan dikonversi ulang ke
+// JPEG dengan kualitas terkompresi, secara otomatis dan transparan (tanpa
+// perlu tindakan dari user). Ini menghemat kuota storage & mempercepat
+// unggah/unduh, terutama untuk petugas lapangan dengan koneksi lambat.
+const KOMPRESI_FOTO = {
+  maxDimensi: 1600,        // px, sisi terpanjang gambar hasil kompresi
+  kualitas: 0.72,          // 0..1 kualitas JPEG
+  minUkuranUntukKompres: 300 * 1024, // < 300KB dianggap sudah cukup kecil, lewati
+};
+function kompresGambar(file, opt = {}){
+  const { maxDimensi, kualitas, minUkuranUntukKompres } = { ...KOMPRESI_FOTO, ...opt };
+  return new Promise((resolve)=>{
+    // Lewati kompresi untuk file bukan gambar, GIF (animasi), atau yang sudah kecil.
+    if(!file || !file.type || !file.type.startsWith('image/') || file.type === 'image/gif' || file.size <= minUkuranUntukKompres){
+      resolve(file); return;
+    }
+    const objUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = ()=>{
+      URL.revokeObjectURL(objUrl);
+      let { width, height } = img;
+      if(width > maxDimensi || height > maxDimensi){
+        if(width >= height){ height = Math.round(height * maxDimensi / width); width = maxDimensi; }
+        else{ width = Math.round(width * maxDimensi / height); height = maxDimensi; }
+      }
+      try{
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob)=>{
+          if(!blob || blob.size >= file.size){ resolve(file); return; } // hasil tidak lebih kecil -> pakai asli
+          const namaBaru = file.name.replace(/\.[a-zA-Z0-9]+$/, '') + '.jpg';
+          const hasil = new File([blob], namaBaru, { type: 'image/jpeg', lastModified: Date.now() });
+          console.log(`[kompresi-foto] ${file.name}: ${(file.size/1024).toFixed(0)}KB -> ${(hasil.size/1024).toFixed(0)}KB`);
+          resolve(hasil);
+        }, 'image/jpeg', kualitas);
+      }catch(e){ console.error('[kompresi-foto] gagal, pakai file asli:', e); resolve(file); }
+    };
+    img.onerror = ()=>{ URL.revokeObjectURL(objUrl); resolve(file); };
+    img.src = objUrl;
+  });
+}
+
 async function uploadFotoKegiatan(file, ruasId, label, folder='penanganan'){
   if(!file) return null;
-  const ext = (file.name.split('.').pop()||'jpg').toLowerCase().replace(/[^a-z0-9]/g,'') || 'jpg';
+  const fileFinal = await kompresGambar(file);
+  const ext = (fileFinal.name.split('.').pop()||'jpg').toLowerCase().replace(/[^a-z0-9]/g,'') || 'jpg';
   const path = `${folder}/${ruasId||'umum'}/${Date.now()}_${label}.${ext}`;
-  const contentType = file.type && file.type.startsWith('image/') ? file.type : (ext==='png'?'image/png':ext==='webp'?'image/webp':ext==='gif'?'image/gif':'image/jpeg');
-  const {error} = await sb.storage.from(FOTO_BUCKET).upload(path, file, {upsert:false, cacheControl:'3600', contentType});
+  const contentType = fileFinal.type && fileFinal.type.startsWith('image/') ? fileFinal.type : (ext==='png'?'image/png':ext==='webp'?'image/webp':ext==='gif'?'image/gif':'image/jpeg');
+  const {error} = await sb.storage.from(FOTO_BUCKET).upload(path, fileFinal, {upsert:false, cacheControl:'3600', contentType});
   if(error) throw error;
   return path;
 }
@@ -1100,7 +1148,7 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
       </div>
       <div>
         <label class="text-[12.5px] font-semibold text-ink-600">Foto Kondisi</label>
-        <p class="text-[11.5px] text-ink-400 mt-0.5 mb-1.5">Bisa pilih lebih dari satu foto sekaligus, atau tambahkan bertahap. Untuk foto dalam jumlah banyak, lebih disarankan pakai Link Dokumentasi di atas.</p>
+        <p class="text-[11.5px] text-ink-400 mt-0.5 mb-1.5">Bisa pilih lebih dari satu foto sekaligus, atau tambahkan bertahap. Untuk foto dalam jumlah banyak, lebih disarankan pakai Link Dokumentasi di atas. Foto akan dikompres otomatis sebelum diunggah agar hemat kuota.</p>
         <div id="sv-foto-existing" class="flex flex-wrap gap-2 mb-1.5"></div>
         <div id="sv-foto-new" class="flex flex-wrap gap-2 mb-1.5"></div>
         <input id="sv-foto" type="file" accept="image/*" multiple class="!py-1.5 text-[12px] w-full">
@@ -1121,7 +1169,7 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
     const newFiles = fotoPicker.getNewFiles();
     submitBtn.disabled = true; const submitLabel = submitBtn.textContent;
     try{
-      if(newFiles.length){ submitBtn.textContent = `Mengunggah ${newFiles.length} foto…`; }
+      if(newFiles.length){ submitBtn.textContent = `Mengompres & mengunggah ${newFiles.length} foto…`; }
       const uploadedPaths = await Promise.all(newFiles.map(f=>uploadFotoKegiatan(f, ruas.id, 'kondisi', 'survei')));
       const fotoPaths = [...fotoPicker.getKeptPaths(), ...uploadedPaths];
       submitBtn.textContent = submitLabel;
@@ -1295,7 +1343,7 @@ function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=nul
     const fileAkhir = overlay.querySelector('#kg-foto-akhir').files?.[0] || null;
     submitBtn.disabled = true; const submitLabel = submitBtn.textContent;
     try{
-      if(fileAwal || fileAkhir){ submitBtn.textContent = 'Mengunggah foto…'; }
+      if(fileAwal || fileAkhir){ submitBtn.textContent = 'Mengompres & mengunggah foto…'; }
       const [fotoAwalPath, fotoAkhirPath] = await Promise.all([
         fileAwal? uploadFotoKegiatan(fileAwal, ruasId, 'awal') : Promise.resolve(editData?.foto_awal_path || null),
         fileAkhir? uploadFotoKegiatan(fileAkhir, ruasId, 'akhir') : Promise.resolve(editData?.foto_akhir_path || null),
