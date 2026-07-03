@@ -1062,6 +1062,16 @@ async function viewPeta(){
       ruas.forEach(r=>{
         const parsed = geomToLatLngs(r.geom);
         if(!parsed) return;
+        // --- validasi: buang koordinat NaN dan titik duplikat berurutan ---
+        const isValidLatLng = c => Array.isArray(c) && Number.isFinite(c[0]) && Number.isFinite(c[1]);
+        if(parsed.type === 'LineString'){
+          const valid = parsed.coords.filter(isValidLatLng);
+          const dedup = valid.filter((c,i)=> i===0 || c[0]!==valid[i-1][0] || c[1]!==valid[i-1][1]);
+          if(dedup.length < 2) return; // garis "nol panjang" / data cacat, lewati
+          parsed.coords = dedup;
+        } else if(parsed.type === 'Point'){
+          if(!isValidLatLng(parsed.coords)) return;
+        } else return;
         let color, popupInfo;
         if(mode === 'kondisi'){
           const k = worstByRuas[r.id];
@@ -1080,7 +1090,11 @@ async function viewPeta(){
         layer.addTo(layerGroup);
         drawn++;
       });
-      if(drawn > 0 && bounds.length){ map.fitBounds(bounds, {padding:[30,30]}); document.getElementById('map-empty').classList.add('hidden'); }
+      if(drawn > 0 && bounds.length){
+        try{ map.fitBounds(bounds, {padding:[30,30]}); }
+        catch(e){ console.warn('fitBounds gagal, pakai tampilan default NTT.', e); map.setView([-9.6, 121.0], 8); }
+        document.getElementById('map-empty').classList.add('hidden');
+      }
       else { document.getElementById('map-empty').classList.remove('hidden'); }
     }
 
