@@ -34,13 +34,16 @@
   .border-line{border-color:var(--line);}
   .card{background:var(--surface); border:1px solid var(--line); border-radius:14px;}
   ::-webkit-scrollbar{width:8px;height:8px;} ::-webkit-scrollbar-thumb{background:#C7D1E0;border-radius:8px;}
-  .header-nav-scroll{scrollbar-width:thin;}
-  .header-nav-scroll::-webkit-scrollbar{height:3px;}
-  .header-nav-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:8px;}
-  .header-nav-scroll::-webkit-scrollbar-track{background:transparent;}
   .tab-btn{position:relative; color:#B9C6DB; transition:color .15s;}
   .tab-btn.active{color:#fff;}
   .tab-btn.active::after{content:'';position:absolute;left:0;right:0;bottom:-13px;height:3px;background:var(--accent);border-radius:2px 2px 0 0;}
+  .sidebar-link{position:relative; color:#B9C6DB; transition:background .15s,color .15s;}
+  .sidebar-link:hover{background:rgba(255,255,255,.06); color:#fff;}
+  .sidebar-link.active{background:rgba(255,255,255,.09); color:#fff;}
+  .sidebar-link.active::before{content:'';position:absolute;left:-10px;top:6px;bottom:6px;width:3px;background:var(--accent);border-radius:0 3px 3px 0;}
+  #sidebar-desktop nav.side-nav{scrollbar-width:thin;}
+  #sidebar-desktop nav.side-nav::-webkit-scrollbar{width:4px;}
+  #sidebar-desktop nav.side-nav::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:8px;}
   .badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;}
   .badge-baik{background:#E7F5EC;color:var(--good);} .badge-sedang{background:#FCF1DF;color:var(--fair);}
   .badge-rusak_ringan{background:#FBE8DE;color:var(--poor);} .badge-rusak_berat{background:#FBE4E4;color:var(--bad);}
@@ -94,6 +97,7 @@ const state = {
   user: null, profile: null, route: 'dashboard',
   kabupatenList: [], kabupatenById: {}, ruasCache: [], selectedRuasId: null,
   charts: {}, map: null, mapLayer: null,
+  sidebarCollapsed: localStorage.getItem('sijalan_sidebar_collapsed')==='1', mobileNavOpen: false,
 };
 const KONDISI_LABEL = {baik:'Baik', sedang:'Sedang', rusak_ringan:'Rusak Ringan', rusak_berat:'Rusak Berat'};
 const KONDISI_ORDER = ['rusak_berat','rusak_ringan','sedang','baik'];
@@ -679,6 +683,10 @@ const ICONS = {
   clipboard:'<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1Z"/><path d="M8.5 11h7M8.5 14.5h7M8.5 18h4"/>',
   bell:'<path d="M6 8a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6Z"/><path d="M10 21a2 2 0 0 0 4 0"/>',
   wifioff:'<path d="M2 4l20 16"/><path d="M8.5 16.5a5 5 0 0 1 5.6-1"/><path d="M5 12.5a10 10 0 0 1 3.5-2.3"/><path d="M12 20h.01"/><path d="M16.8 13.5A10 10 0 0 1 19 12"/><path d="M19.5 8.7A15 15 0 0 1 22 10"/><path d="M2 9a15 15 0 0 1 4-2.5"/>',
+  menu:'<path d="M3 6h18M3 12h18M3 18h18"/>',
+  close:'<path d="M18 6 6 18"/><path d="M6 6l12 12"/>',
+  collapse:'<path d="M11 17 6 12l5-5"/><path d="M18 17l-5-5 5-5"/>',
+  expand:'<path d="M13 17l5-5-5-5"/><path d="M6 17l5-5-5-5"/>',
 };
 function actionBtns({onEdit, onDelete, onDetail}={}){
   let html = '<div class="flex items-center gap-1.5" onclick="event.stopPropagation()">';
@@ -691,50 +699,83 @@ function actionBtns({onEdit, onDelete, onDetail}={}){
 async function confirmDelete(msg){ return window.confirm(msg || 'Yakin ingin menghapus data ini? Tindakan ini tidak dapat dibatalkan.'); }
 function icon(name, cls='w-5 h-5'){ return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||''}</svg>`; }
 
+function sidebarLink(n, collapsed){
+  const active = state.route===n.id;
+  return `<button data-nav="${n.id}" class="sidebar-link w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold ${active?'active':''} ${collapsed?'justify-center':''}" title="${n.label}">
+    ${icon(n.icon,'w-[18px] h-[18px] shrink-0')}${collapsed?'':`<span class="truncate">${n.label}</span>`}
+  </button>`;
+}
+function sidebarContent(collapsed, closeBtn){
+  const allItems = [...NAV_ITEMS, ...(isAdmin()?[{id:'admin',label:'Pengguna',icon:'user'},{id:'log',label:'Log Aktivitas',icon:'clipboard'}]:[])];
+  const initials = (state.profile?.nama || state.user.email || '?').trim().slice(0,1).toUpperCase();
+  return `
+    <div class="flex items-center gap-3 h-16 shrink-0 ${collapsed?'justify-center px-0':'px-4'}">
+      <div class="w-9 h-9 rounded-lg bg-accent flex items-center justify-center font-display font-extrabold text-navy-950 shrink-0">S</div>
+      ${collapsed?'':`<div class="leading-tight min-w-0 flex-1">
+        <div class="font-display font-extrabold text-white text-[15px] tracking-tight truncate">SIJALAN</div>
+        <div class="text-[10px] text-[#8FA3C2] -mt-0.5 truncate">Bina Marga · Dinas PUPR NTT</div>
+      </div>`}
+      ${closeBtn?`<button id="btn-mobile-close" class="p-1.5 rounded-md hover:bg-white/10 text-white/70 hover:text-white shrink-0">${icon('close','w-5 h-5')}</button>`:''}
+    </div>
+    <nav class="side-nav flex-1 overflow-y-auto px-2.5 py-2 space-y-1">
+      ${allItems.map(n=>sidebarLink(n, collapsed)).join('')}
+    </nav>
+    <div class="border-t border-white/10 p-2.5 shrink-0">
+      ${!closeBtn?`<button id="btn-collapse" class="w-full flex items-center gap-2.5 px-2.5 py-2 mb-1 rounded-lg text-[#8FA3C2] hover:bg-white/6 hover:text-white text-[12.5px] font-semibold ${collapsed?'justify-center':''}" title="${collapsed?'Perluas menu':'Ciutkan menu'}">${icon(collapsed?'expand':'collapse','w-4 h-4 shrink-0')}${collapsed?'':'<span>Ciutkan menu</span>'}</button>`:''}
+      <div class="flex items-center gap-2.5 px-2.5 py-1.5 ${collapsed?'justify-center':''}">
+        <div class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white text-[12px] font-bold shrink-0">${initials}</div>
+        ${collapsed?'':`<div class="min-w-0 flex-1 leading-tight">
+          <div class="text-white text-[12.5px] font-semibold truncate">${state.profile?.nama || state.user.email}</div>
+          <div class="text-[10.5px] text-accent font-semibold truncate">${ROLE_LABEL[state.profile?.role]||'Peninjau'}</div>
+        </div>
+        <button id="btn-logout" class="p-1.5 rounded-md hover:bg-white/10 text-white/70 hover:text-white shrink-0" title="Keluar">${icon('logout','w-4 h-4')}</button>`}
+      </div>
+      ${collapsed?`<button id="btn-logout" class="w-full flex items-center justify-center p-1.5 rounded-md hover:bg-white/10 text-white/70 hover:text-white mt-1" title="Keluar">${icon('logout','w-4 h-4')}</button>`:''}
+    </div>`;
+}
 function renderShell(){
   const root = document.getElementById('root');
+  const collapsed = state.sidebarCollapsed;
   root.innerHTML = `
-  <div class="min-h-screen flex flex-col">
-    <header class="bg-navy-950 sticky top-0 z-30">
-      <div class="max-w-[1400px] mx-auto px-5 flex items-center gap-4 h-16">
-        <div class="flex items-center gap-3 shrink-0">
-          <div class="w-9 h-9 rounded-lg bg-accent flex items-center justify-center font-display font-800 text-navy-950 font-extrabold">S</div>
-          <div class="leading-tight">
-            <div class="font-display font-extrabold text-white text-[15px] tracking-tight">SIJALAN</div>
-            <div class="text-[10.5px] text-[#8FA3C2] -mt-0.5">Bina Marga · Dinas PUPR Provinsi NTT</div>
-          </div>
+  <div class="min-h-screen flex">
+    <aside id="sidebar-desktop" class="hidden md:flex md:flex-col ${collapsed?'md:w-[76px]':'md:w-64'} bg-navy-950 sticky top-0 h-screen shrink-0 transition-[width] duration-200">
+      ${sidebarContent(collapsed, false)}
+    </aside>
+    <div id="mobile-overlay" class="md:hidden fixed inset-0 bg-black/50 z-40 ${state.mobileNavOpen?'':'hidden'}"></div>
+    <aside id="sidebar-mobile" class="md:hidden fixed top-0 left-0 h-full w-72 bg-navy-950 z-50 flex flex-col transition-transform duration-200 ${state.mobileNavOpen?'translate-x-0':'-translate-x-full'}">
+      ${sidebarContent(false, true)}
+    </aside>
+    <div class="flex-1 flex flex-col min-w-0">
+      <header class="bg-white border-b border-line sticky top-0 z-20 h-16 shrink-0 flex items-center gap-3 px-4 md:px-6">
+        <button id="btn-mobile-menu" class="md:hidden p-2 -ml-2 rounded-lg hover:bg-[#EEF1F6] text-ink-600">${icon('menu','w-5 h-5')}</button>
+        <div class="md:hidden flex items-center gap-2 min-w-0">
+          <div class="w-7 h-7 rounded-md bg-navy-950 flex items-center justify-center font-display font-extrabold text-accent text-[12px] shrink-0">S</div>
+          <span class="font-display font-extrabold text-ink-900 text-[14px] truncate">SIJALAN</span>
         </div>
-        <nav class="hidden md:flex items-center gap-5 flex-1 min-w-0 overflow-x-auto header-nav-scroll">
-          ${NAV_ITEMS.map(n=>`<button data-nav="${n.id}" class="tab-btn ${state.route===n.id?'active':''} flex items-center gap-1.5 text-[13px] font-semibold pb-4 pt-4 shrink-0 whitespace-nowrap">${icon(n.icon,'w-4 h-4')}${n.label}</button>`).join('')}
-          ${isAdmin()?`<button data-nav="admin" class="tab-btn ${state.route==='admin'?'active':''} flex items-center gap-1.5 text-[13px] font-semibold pb-4 pt-4 shrink-0 whitespace-nowrap">${icon('user','w-4 h-4')}Pengguna</button>`:''}
-          ${isAdmin()?`<button data-nav="log" class="tab-btn ${state.route==='log'?'active':''} flex items-center gap-1.5 text-[13px] font-semibold pb-4 pt-4 shrink-0 whitespace-nowrap">${icon('clipboard','w-4 h-4')}Log Aktivitas</button>`:''}
-        </nav>
-        <div class="flex items-center gap-3 shrink-0">
-          <span id="conn-badge" class="hidden inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-white bg-[var(--bad)]/80 rounded-full px-2.5 py-1">${icon('wifioff','w-3.5 h-3.5')}Offline<span id="offline-badge" class="hidden ml-0.5 bg-white/25 rounded-full px-1.5">0</span></span>
-          <div class="relative">
-            <button id="btn-notif" class="relative p-2 rounded-lg hover:bg-white/10 text-white/85 hover:text-white" title="Notifikasi">
-              ${icon('bell','w-5 h-5')}
-              <span id="notif-count" class="hidden absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-[var(--bad)] text-white text-[10px] font-bold flex items-center justify-center">0</span>
-            </button>
-            <div id="notif-panel" class="hidden absolute right-0 top-11 w-80 max-h-96 overflow-y-auto card shadow-xl z-40"></div>
-          </div>
-          <div class="hidden lg:block text-right leading-tight">
-            <div class="text-white text-[13px] font-semibold">${state.profile?.nama || state.user.email}</div>
-            <div class="text-[11px] text-accent font-semibold">${ROLE_LABEL[state.profile?.role]||'Peninjau'}</div>
-          </div>
-          <button id="btn-logout" class="btn-ghost !border-white/15 !text-white/80 hover:!text-white !py-2 !px-3" title="Keluar">${icon('logout','w-4 h-4')}</button>
+        <div class="flex-1"></div>
+        <span id="conn-badge" class="hidden inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-white bg-[var(--bad)]/90 rounded-full px-2.5 py-1">${icon('wifioff','w-3.5 h-3.5')}Offline<span id="offline-badge" class="hidden ml-0.5 bg-white/25 rounded-full px-1.5">0</span></span>
+        <div class="relative">
+          <button id="btn-notif" class="relative p-2 rounded-lg hover:bg-[#EEF1F6] text-ink-600" title="Notifikasi">
+            ${icon('bell','w-5 h-5')}
+            <span id="notif-count" class="hidden absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-[var(--bad)] text-white text-[10px] font-bold flex items-center justify-center">0</span>
+          </button>
+          <div id="notif-panel" class="hidden absolute right-0 top-11 w-80 max-h-96 overflow-y-auto card shadow-xl z-40"></div>
         </div>
-      </div>
-      <div class="md:hidden flex gap-4 overflow-x-auto px-5 pb-2 -mt-1">
-        ${NAV_ITEMS.map(n=>`<button data-nav="${n.id}" class="tab-btn ${state.route===n.id?'active':''} text-[12.5px] font-semibold whitespace-nowrap pb-2">${n.label}</button>`).join('')}
-        ${isAdmin()?`<button data-nav="log" class="tab-btn ${state.route==='log'?'active':''} text-[12.5px] font-semibold whitespace-nowrap pb-2">Log Aktivitas</button>`:''}
-      </div>
-    </header>
-    <main class="flex-1 max-w-[1400px] w-full mx-auto px-5 py-7" id="view"></main>
-    <footer class="text-center text-[11.5px] text-ink-400 py-6">SIJALAN — Sistem Informasi Jalan · Bina Marga, Dinas Pekerjaan Umum dan Perumahan Rakyat Provinsi Nusa Tenggara Timur</footer>
+      </header>
+      <main class="flex-1 max-w-[1400px] w-full mx-auto px-5 py-7" id="view"></main>
+      <footer class="text-center text-[11.5px] text-ink-400 py-6">SIJALAN — Sistem Informasi Jalan · Bina Marga, Dinas Pekerjaan Umum dan Perumahan Rakyat Provinsi Nusa Tenggara Timur</footer>
+    </div>
   </div>`;
-  root.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click', ()=>{ state.route=b.dataset.nav; renderShell(); routeView(); }));
-  document.getElementById('btn-logout').addEventListener('click', async ()=>{ await sb.auth.signOut(); });
+  root.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click', ()=>{ state.route=b.dataset.nav; state.mobileNavOpen=false; renderShell(); routeView(); }));
+  root.querySelectorAll('#btn-logout').forEach(b=>b.addEventListener('click', async ()=>{ await sb.auth.signOut(); }));
+  const collapseBtn = document.getElementById('btn-collapse');
+  if(collapseBtn) collapseBtn.addEventListener('click', ()=>{ state.sidebarCollapsed=!state.sidebarCollapsed; localStorage.setItem('sijalan_sidebar_collapsed', state.sidebarCollapsed?'1':'0'); renderShell(); });
+  const mobileMenuBtn = document.getElementById('btn-mobile-menu');
+  if(mobileMenuBtn) mobileMenuBtn.addEventListener('click', ()=>{ state.mobileNavOpen=true; renderShell(); });
+  const mobileCloseBtn = document.getElementById('btn-mobile-close');
+  if(mobileCloseBtn) mobileCloseBtn.addEventListener('click', ()=>{ state.mobileNavOpen=false; renderShell(); });
+  const overlay = document.getElementById('mobile-overlay');
+  if(overlay) overlay.addEventListener('click', ()=>{ state.mobileNavOpen=false; renderShell(); });
   updateConnBadge(); updateOfflineBadge();
   wireNotifBell();
   routeView();
