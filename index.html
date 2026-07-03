@@ -185,6 +185,9 @@ async function hydrateFotoThumbs(container){
       if(ph) ph.remove();
     });
     img.addEventListener('error', (e)=>{ console.error('[foto] gagal memuat gambar dari signed URL:', url); });
+    // Semua thumbnail foto (termasuk di Riwayat Survei Kondisi) bisa diklik untuk preview ukuran penuh.
+    img.classList.add('cursor-zoom-in');
+    img.addEventListener('click', (e)=>{ e.stopPropagation(); if(img.src) window.open(img.src, '_blank'); });
     img.src = url;
   });
 }
@@ -429,7 +432,7 @@ function renderShell(){
       </div>
     </header>
     <main class="flex-1 max-w-[1400px] w-full mx-auto px-5 py-7" id="view"></main>
-    <footer class="text-center text-[11.5px] text-ink-400 py-6">SIJALAN — Sistem Informasi Jalan · Bina Marga, Dinas Pekerjaan Umum dan Penataan Ruang Provinsi Nusa Tenggara Timur</footer>
+    <footer class="text-center text-[11.5px] text-ink-400 py-6">SIJALAN — Sistem Informasi Jalan · Bina Marga, Dinas Pekerjaan Umum dan Perumahan Rakyat Provinsi Nusa Tenggara Timur</footer>
   </div>`;
   root.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click', ()=>{ state.route=b.dataset.nav; renderShell(); routeView(); }));
   document.getElementById('btn-logout').addEventListener('click', async ()=>{ await sb.auth.signOut(); });
@@ -790,7 +793,7 @@ async function viewRuasDetail(id){
                 ${fotoThumbHtml(r.foto_awal_path || r.foto_akhir_path)}
                 <div>
                   <div class="font-semibold text-[13.5px] capitalize">${(r.jenis_penanganan||'—').replaceAll('_',' ')} <span class="text-ink-400 font-normal">· TA ${new Date(r.tanggal_penanganan||r.created_at).getFullYear()}</span></div>
-                  <div class="text-[12.5px] text-ink-500 mt-0.5">STA ${fmtNum(r.sta_awal,3)}–${fmtNum(r.sta_akhir,3)} · ${fmtDate(r.tanggal_penanganan)}</div>
+                  <div class="text-[12.5px] text-ink-500 mt-0.5">STA ${fmtNum(r.sta_awal,3)}–${fmtNum(r.sta_akhir,3)} · Mulai ${fmtDate(r.tanggal_penanganan)}${r.tanggal_selesai? ' · Selesai '+fmtDate(r.tanggal_selesai) : ''}</div>
                   ${r.sub_kegiatan? `<div class="text-[12px] text-ink-400 mt-0.5">${r.sub_kegiatan}</div>`:''}
                   ${r.kontraktor_pelaksana? `<div class="text-[12px] text-ink-400 mt-0.5">Pelaksana: ${r.kontraktor_pelaksana} ${r.biaya? '· '+fmtRp(r.biaya):''}</div>`:''}
                   ${r.kejadian_bencana_id? `<div class="text-[11.5px] text-[var(--bad)] mt-0.5">⚠ Menangani kejadian: ${(r.bencana_jenis_kejadian||'—').replaceAll('_',' ')} · ${fmtDate(r.bencana_tanggal_kejadian)}</div>`:''}
@@ -1272,8 +1275,10 @@ function openKegiatanDetailModal(kg){
   const overlay = openModal(`
     <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
     <h3 class="font-display font-extrabold text-lg mb-1 capitalize">${(kg.jenis_penanganan||'—').replaceAll('_',' ')}</h3>
-    <p class="text-[13px] text-ink-500 mb-4">${kg.kode_ruas} · ${kg.nama_ruas} · ${fmtDate(kg.tanggal_penanganan)}</p>
+    <p class="text-[13px] text-ink-500 mb-4">${kg.kode_ruas} · ${kg.nama_ruas} · ${fmtDate(kg.tanggal_penanganan)}${kg.tanggal_selesai? ' – '+fmtDate(kg.tanggal_selesai) : ''}</p>
     <div class="grid grid-cols-2 gap-3 text-[13px] mb-4">
+      <div><span class="text-ink-400">Tanggal Mulai</span><div class="font-medium font-mono">${fmtDate(kg.tanggal_penanganan)}</div></div>
+      <div><span class="text-ink-400">Tanggal Selesai</span><div class="font-medium font-mono">${kg.tanggal_selesai? fmtDate(kg.tanggal_selesai) : '—'}</div></div>
       <div><span class="text-ink-400">Sub Kegiatan</span><div class="font-medium">${kg.sub_kegiatan||'—'}</div></div>
       <div><span class="text-ink-400">STA</span><div class="font-medium font-mono">${fmtNum(kg.sta_awal,3)}–${fmtNum(kg.sta_akhir,3)}</div></div>
       <div><span class="text-ink-400">Sumber Dana</span><div class="font-medium">${(kg.sumber_dana||'—').replaceAll('_',' ')}</div></div>
@@ -1300,10 +1305,6 @@ function openKegiatanDetailModal(kg){
   overlay.querySelector('div.card').classList.add('!max-w-2xl');
   overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
   hydrateFotoThumbs(overlay);
-  overlay.querySelectorAll('img[data-foto-path]').forEach(img=>{
-    img.classList.add('cursor-zoom-in');
-    img.addEventListener('click', ()=>{ if(img.src) window.open(img.src, '_blank'); });
-  });
 
   api.dokumenMatrix(kg.id).then(rows=>{
     const box = overlay.querySelector('#dok-matrix');
@@ -1482,7 +1483,7 @@ async function viewKegiatan(){
       <select id="fk-status" class="max-w-[180px]"><option value="">Semua Status</option>${STATUS_PEKERJAAN_OPT.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
     </div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th>Foto</th><th>Ruas</th><th>Jenis</th><th>Sub Kegiatan</th><th>Tanggal</th><th>Biaya</th><th>Status</th><th>Link Dokumentasi</th>${isEditor()?'<th>Aksi</th>':''}</tr></thead>
+      <table><thead><tr><th>Foto</th><th>Ruas</th><th>Jenis</th><th>Sub Kegiatan</th><th>Tgl. Mulai</th><th>Tgl. Selesai</th><th>Biaya</th><th>Status</th><th>Link Dokumentasi</th>${isEditor()?'<th>Aksi</th>':''}</tr></thead>
       <tbody id="kegiatan-tbody"></tbody></table>
     </div>
     <div id="kegiatan-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Belum ada kegiatan penanganan yang tercatat.</div>`;
@@ -1505,6 +1506,7 @@ async function viewKegiatan(){
           <td class="capitalize">${(k.jenis_penanganan||'—').replaceAll('_',' ')}${k.kejadian_bencana_id?` <span class="text-[var(--bad)]" title="Menangani kejadian bencana: ${(k.bencana_jenis_kejadian||'—').replaceAll('_',' ')} · ${fmtDate(k.bencana_tanggal_kejadian)}">⚠</span>`:''}</td>
           <td class="text-ink-500 text-[12.5px] max-w-[220px] truncate">${k.sub_kegiatan||'—'}</td>
           <td class="font-mono text-[12.5px]">${fmtDate(k.tanggal_penanganan)}</td>
+          <td class="font-mono text-[12.5px]">${k.tanggal_selesai? fmtDate(k.tanggal_selesai) : '—'}</td>
           <td class="font-mono text-[12.5px]">${fmtRp(k.biaya)}</td>
           <td><span class="badge ${k.status_pekerjaan==='selesai'?'badge-baik':k.status_pekerjaan==='terhenti'?'badge-rusak_berat':'badge-sedang'} capitalize">${(k.status_pekerjaan||'—').replaceAll('_',' ')}</span></td>
           <td class="max-w-[160px]">${k.link_dokumentasi?`<a href="${k.link_dokumentasi}" target="_blank" rel="noopener" data-stop-row class="text-navy-700 underline text-[12.5px] truncate block">Buka Link</a>`:'<span class="text-ink-400 text-[12.5px]">—</span>'}</td>
