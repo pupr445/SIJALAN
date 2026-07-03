@@ -469,9 +469,13 @@ function wireMultiPhotoPicker(inputEl, existingContainer, newContainer, existing
   return { getKeptPaths: ()=>kept, getNewFiles: ()=>newFiles };
 }
 
-// --- 3. PARSER WKB HEX -> GEOJSON (ringan, tanpa dependensi) --------------
+// --- 3. PARSER GEOM -> LATLNGS (ringan, tanpa dependensi) --------------
+// Menangani DUA kemungkinan format yang dikembalikan Supabase/PostgREST
+// untuk kolom PostGIS `geometry`:
+//  (a) string hex WKB/EWKB, mis. "0102000020E6100000..."
+//  (b) object GeoJSON, mis. {type:"LineString", coordinates:[[lon,lat],...]}
 function wkbHexToLatLngs(hex){
-  if(!hex) return null;
+  if(!hex || typeof hex !== 'string') return null;
   try{
     const bytes = new Uint8Array(hex.match(/../g).map(b=>parseInt(b,16)));
     let off = 0;
@@ -485,6 +489,30 @@ function wkbHexToLatLngs(hex){
     if(type === 2){ const n=readU32(); const pts=[]; for(let i=0;i<n;i++){ const x=readF64(), y=readF64(); pts.push([y,x]); } return {type:'LineString', coords:pts}; }
     return null;
   }catch(e){ return null; }
+}
+function geoJsonToLatLngs(gj){
+  if(!gj || typeof gj !== 'object' || !Array.isArray(gj.coordinates)) return null;
+  try{
+    if(gj.type === 'Point'){
+      const [x,y] = gj.coordinates; return {type:'Point', coords:[y,x]};
+    }
+    if(gj.type === 'LineString'){
+      return {type:'LineString', coords: gj.coordinates.map(([x,y])=>[y,x])};
+    }
+    if(gj.type === 'MultiLineString'){
+      // gabungkan semua bagian jadi satu LineString untuk digambar sederhana
+      const pts = [];
+      gj.coordinates.forEach(line => line.forEach(([x,y]) => pts.push([y,x])));
+      return {type:'LineString', coords: pts};
+    }
+    return null;
+  }catch(e){ return null; }
+}
+function geomToLatLngs(geom){
+  if(!geom) return null;
+  if(typeof geom === 'string') return wkbHexToLatLngs(geom);
+  if(typeof geom === 'object') return geoJsonToLatLngs(geom);
+  return null;
 }
 
 // --- 4. DATA LAYER (SUPABASE QUERIES) -------------------------------------
@@ -1010,20 +1038,7 @@ async function viewPeta(){
   }
 
   try{
-    const {data:{session:__debugSession}} = await sb.auth.getSession();
     const [ruas, kondisi, skorList] = await Promise.all([api.ruasList(), api.kondisiTerkini(), api.skorPrioritasAll().catch(()=>[])]);
-    // === DEBUG SEMENTARA — hapus blok ini setelah selesai verifikasi ===
-    const __debugInfo = `
-      <div style="background:#FFF7E0;border:1px solid #E0C060;border-radius:8px;padding:12px;margin-top:12px;font-family:monospace;font-size:12px;white-space:pre-wrap;">
-DEBUG PETA
-Login sebagai: ${__debugSession ? (__debugSession.user.email + ' (role token: authenticated)') : 'TIDAK LOGIN (role token: anon)'}
-Sesi kadaluarsa pada: ${__debugSession ? new Date(__debugSession.expires_at*1000).toLocaleString() : '-'}
-Jumlah ruas diterima dari API: ${ruas.length}
-Contoh 3 baris pertama:
-${ruas.slice(0,3).map(r=>`  - ${r.kode_ruas||'(tanpa kode)'} | geom: ${r.geom ? ('ADA (' + r.geom.length + ' karakter, awalan: ' + r.geom.slice(0,12) + '...)') : 'NULL/KOSONG'}`).join('\n') || '  (array kosong)'}
-      </div>`;
-    v.insertAdjacentHTML('beforeend', __debugInfo);
-    // === AKHIR BLOK DEBUG ===
     // worst kondisi per ruas
     const worstByRuas = {};
     kondisi.forEach(row=>{
@@ -1045,7 +1060,7 @@ ${ruas.slice(0,3).map(r=>`  - ${r.kode_ruas||'(tanpa kode)'} | geom: ${r.geom ? 
       drawn = 0;
       const bounds = [];
       ruas.forEach(r=>{
-        const parsed = wkbHexToLatLngs(r.geom);
+        const parsed = geomToLatLngs(r.geom);
         if(!parsed) return;
         let color, popupInfo;
         if(mode === 'kondisi'){
