@@ -820,12 +820,39 @@ function renderLogin(){
     <div class="hidden lg:flex flex-col justify-between bg-navy-950 p-12 relative overflow-hidden">
       <div class="absolute inset-0 opacity-[0.07]" style="background-image:repeating-linear-gradient(90deg,#fff 0 2px,transparent 2px 26px);"></div>
       <div class="relative">
-        <div class="flex items-center gap-3 mb-16">
+        <div class="flex items-center gap-4 mb-3 pb-5 border-b border-white/10">
+          <img src="https://upload.wikimedia.org/wikipedia/commons/c/c6/Logo_Kementerian_Pekerjaan_Umum_Republik_Indonesia.svg" alt="Logo Kementerian PUPR" class="h-11 w-11 object-contain shrink-0" onerror="this.style.display='none'">
+          <div class="h-9 w-px bg-white/15"></div>
+          <img src="https://upload.wikimedia.org/wikipedia/commons/e/e9/Coat_of_Arms_of_East_Nusa_Tenggara_NEW.png" alt="Lambang Provinsi Nusa Tenggara Timur" class="h-11 w-11 object-contain shrink-0" onerror="this.style.display='none'">
+          <div class="h-9 w-px bg-white/15"></div>
+          <div class="leading-tight">
+            <div class="text-white text-[12.5px] font-semibold">Pemerintah Provinsi Nusa Tenggara Timur</div>
+            <div class="text-[#9FB0CB] text-[11.5px]">Dinas PUPR — Bidang Bina Marga</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-3 mb-10">
           <div class="w-10 h-10 rounded-lg bg-accent flex items-center justify-center font-display font-extrabold text-navy-950">S</div>
           <div class="font-display font-extrabold text-white text-lg">SIJALAN</div>
         </div>
         <h1 class="font-display text-white text-[38px] leading-[1.1] font-extrabold max-w-md">Satu peta, satu data, seluruh jaringan jalan provinsi.</h1>
         <p class="text-[#9FB0CB] mt-5 max-w-sm text-[15px] leading-relaxed">Pantau kondisi ruas, riwayat penanganan, dan realisasi anggaran jalan di 22 kabupaten/kota Nusa Tenggara Timur — terbarui langsung dari lapangan.</p>
+        <div class="grid grid-cols-3 gap-3 mt-7 max-w-md">
+          <div class="relative rounded-xl overflow-hidden h-24 group">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Komodo_dragon_%28Varanus_komodoensis%29.jpg/400px-Komodo_dragon_%28Varanus_komodoensis%29.jpg" alt="Komodo, Taman Nasional Komodo" class="w-full h-full object-cover">
+            <div class="absolute inset-0 bg-gradient-to-t from-navy-950/85 via-navy-950/0 to-transparent"></div>
+            <span class="absolute bottom-1.5 left-2 text-white text-[10.5px] font-semibold">Komodo</span>
+          </div>
+          <div class="relative rounded-xl overflow-hidden h-24 group">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/Pulau_Padar.jpg/400px-Pulau_Padar.jpg" alt="Pulau Padar, Labuan Bajo" class="w-full h-full object-cover">
+            <div class="absolute inset-0 bg-gradient-to-t from-navy-950/85 via-navy-950/0 to-transparent"></div>
+            <span class="absolute bottom-1.5 left-2 text-white text-[10.5px] font-semibold">Labuan Bajo</span>
+          </div>
+          <div class="relative rounded-xl overflow-hidden h-24 group">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/b/b6/Danau_Kelimutu.jpg/400px-Danau_Kelimutu.jpg" alt="Danau Kelimutu, Ende" class="w-full h-full object-cover">
+            <div class="absolute inset-0 bg-gradient-to-t from-navy-950/85 via-navy-950/0 to-transparent"></div>
+            <span class="absolute bottom-1.5 left-2 text-white text-[10.5px] font-semibold">Kelimutu</span>
+          </div>
+        </div>
       </div>
       <div class="relative">
         <div class="roadruler w-full max-w-md"><div class="lane"></div></div>
@@ -834,9 +861,18 @@ function renderLogin(){
     </div>
     <div class="flex items-center justify-center p-8">
       <div class="w-full max-w-sm">
+        <div class="lg:hidden flex items-center justify-center gap-3 mb-4">
+          <img src="https://upload.wikimedia.org/wikipedia/commons/c/c6/Logo_Kementerian_Pekerjaan_Umum_Republik_Indonesia.svg" alt="Logo Kementerian PUPR" class="h-8 w-8 object-contain" onerror="this.style.display='none'">
+          <img src="https://upload.wikimedia.org/wikipedia/commons/e/e9/Coat_of_Arms_of_East_Nusa_Tenggara_NEW.png" alt="Lambang Provinsi Nusa Tenggara Timur" class="h-8 w-8 object-contain" onerror="this.style.display='none'">
+        </div>
         <div class="lg:hidden flex items-center gap-3 mb-8 justify-center">
           <div class="w-9 h-9 rounded-lg bg-navy-900 flex items-center justify-center font-display font-extrabold text-accent">S</div>
           <div class="font-display font-extrabold text-navy-900 text-lg">SIJALAN</div>
+        </div>
+        <div class="hidden lg:flex items-center gap-2.5 mb-5">
+          <img src="https://upload.wikimedia.org/wikipedia/commons/c/c6/Logo_Kementerian_Pekerjaan_Umum_Republik_Indonesia.svg" alt="Logo Kementerian PUPR" class="h-7 w-7 object-contain" onerror="this.style.display='none'">
+          <img src="https://upload.wikimedia.org/wikipedia/commons/e/e9/Coat_of_Arms_of_East_Nusa_Tenggara_NEW.png" alt="Lambang Provinsi Nusa Tenggara Timur" class="h-7 w-7 object-contain" onerror="this.style.display='none'">
+          <span class="text-[11.5px] text-ink-400 font-medium ml-1">Sistem resmi Dinas PUPR Provinsi NTT</span>
         </div>
         <h2 class="font-display font-extrabold text-2xl text-ink-900 mb-1">Masuk ke akun</h2>
         <p class="text-ink-500 text-[13.5px] mb-6">Gunakan akun dinas Anda untuk mengakses data.</p>
