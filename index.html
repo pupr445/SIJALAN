@@ -718,10 +718,11 @@ async function viewRuas(){
       <input id="f-search" placeholder="Cari kode / nama ruas…" class="max-w-xs">
       <select id="f-kabupaten" class="max-w-[220px]"><option value="">Semua Kabupaten/Kota</option>${kabupaten.map(k=>`<option value="${k.id}">${k.nama}</option>`).join('')}</select>
       <select id="f-status" class="max-w-[180px]"><option value="">Semua Status</option><option value="nasional">Nasional</option><option value="provinsi">Provinsi</option><option value="kabupaten">Kabupaten</option></select>
+      <select id="f-fungsi" class="max-w-[180px]"><option value="">Semua Fungsi</option><option value="arteri">Arteri</option><option value="kolektor">Kolektor</option><option value="lokal">Lokal</option></select>
       <select id="f-kondisi" class="max-w-[180px]"><option value="">Semua Kondisi</option>${KONDISI_ORDER.map(k=>`<option value="${k}">${KONDISI_LABEL[k]}</option>`).join('')}</select>
     </div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th>Kode</th><th>Nama Ruas</th><th>Kab/Kota</th><th>Status</th><th>Panjang</th><th>Lebar</th><th>Kondisi</th>${isEditor()?'<th>Aksi</th>':''}</tr></thead>
+      <table><thead><tr><th>Kode</th><th>Nama Ruas</th><th>Kab/Kota</th><th>Status</th><th>Fungsi</th><th>Panjang</th><th>Lebar</th><th>Koordinat</th><th>Kondisi</th>${isEditor()?'<th>Aksi</th>':''}</tr></thead>
       <tbody id="ruas-tbody"></tbody></table>
     </div>
     <div id="ruas-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada ruas yang cocok dengan filter.</div>`;
@@ -731,10 +732,12 @@ async function viewRuas(){
       const kab = document.getElementById('f-kabupaten').value;
       const st = document.getElementById('f-status').value;
       const kd = document.getElementById('f-kondisi').value;
+      const fg = document.getElementById('f-fungsi').value;
       const rows = ruas.filter(r=>{
         if(q && !(r.kode_ruas?.toLowerCase().includes(q) || r.nama_ruas?.toLowerCase().includes(q))) return false;
         if(kab && r.kabupaten_id !== kab) return false;
         if(st && r.status_jalan !== st) return false;
+        if(fg && r.fungsi_jalan !== fg) return false;
         if(kd && worstByRuas[r.id] !== kd) return false;
         return true;
       });
@@ -745,8 +748,14 @@ async function viewRuas(){
           <td class="font-medium">${r.nama_ruas}</td>
           <td class="text-ink-500">${r.kabupaten?.nama || '—'}</td>
           <td class="capitalize text-ink-500">${r.status_jalan||'—'}</td>
+          <td class="capitalize text-ink-500">${r.fungsi_jalan||'—'}</td>
           <td class="font-mono">${fmtNum(r.panjang_km,1)} km</td>
           <td class="font-mono">${r.lebar_jalan_m!=null? fmtNum(r.lebar_jalan_m,1)+' m' : '—'}</td>
+          <td class="font-mono text-[11.5px]">
+            ${(r.lat_awal!=null && r.long_awal!=null)? `<div>A: <a href="https://www.google.com/maps?q=${r.lat_awal},${r.long_awal}" target="_blank" class="text-navy-700 underline" onclick="event.stopPropagation()">${fmtNum(r.lat_awal,6)}, ${fmtNum(r.long_awal,6)}</a></div>` : ''}
+            ${(r.lat_akhir!=null && r.long_akhir!=null)? `<div>B: <a href="https://www.google.com/maps?q=${r.lat_akhir},${r.long_akhir}" target="_blank" class="text-navy-700 underline" onclick="event.stopPropagation()">${fmtNum(r.lat_akhir,6)}, ${fmtNum(r.long_akhir,6)}</a></div>` : ''}
+            ${(r.lat_awal==null && r.lat_akhir==null)? '—' : ''}
+          </td>
           <td>${badge(worstByRuas[r.id])}</td>
           ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
         </tr>`).join('');
@@ -763,7 +772,7 @@ async function viewRuas(){
         });
       });
     }
-    ['f-search','f-kabupaten','f-status','f-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    ['f-search','f-kabupaten','f-status','f-fungsi','f-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
     renderRows();
     if(isEditor()){ document.getElementById('btn-add-ruas').addEventListener('click', ()=>openRuasFormModal(kabupaten)); }
   }catch(err){ v.innerHTML = errorPanel(err); }
