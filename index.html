@@ -200,6 +200,114 @@ function exportPdfTabel(judul, kolom, rows, filename='data'){
     doc.save(`${filename}.pdf`);
   }catch(e){ console.error('[export-pdf] gagal:', e); alert('Gagal membuat file PDF: '+e.message); }
 }
+// exportLaporanRuasPdf(ruas, ...): laporan PDF gabungan SATU ruas (poin 9
+// rencana pengembangan) — kondisi per segmen + anggaran + kegiatan penanganan
+// + kejadian bencana, disusun jadi satu dokumen multi-bagian. Menggunakan
+// infrastruktur jsPDF/autoTable yang sama dengan exportPdfTabel di atas,
+// hanya dipanggil berkali-kali (satu kali per bagian) dalam satu dokumen.
+function exportLaporanRuasPdf(ruas, segmen, kegiatan, survei, anggaran, bencana){
+  try{
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation:'portrait' });
+    const pageH = doc.internal.pageSize.getHeight();
+    let y = 16;
+
+    doc.setFontSize(15);
+    doc.text('Laporan Ruas Jalan', 14, y); y += 6.5;
+    doc.setFontSize(9);
+    doc.setTextColor(120,120,120);
+    doc.text(`SIJALAN · Diekspor ${new Date().toLocaleString('id-ID')}`, 14, y); y += 8;
+    doc.setTextColor(0,0,0);
+
+    doc.setFontSize(12);
+    doc.text(`${ruas.kode_ruas||''} — ${ruas.nama_ruas||''}`, 14, y); y += 6;
+    doc.setFontSize(9.5);
+    [
+      `Kabupaten/Kota: ${ruas.kabupaten?.nama||'—'}`,
+      `Status/Fungsi: ${(ruas.status_jalan||'—')}${ruas.fungsi_jalan? ' · Fungsi '+ruas.fungsi_jalan : ''}`,
+      `Panjang: ${fmtNum(ruas.panjang_km,1)} km${ruas.lebar_jalan_m!=null? ' · Lebar '+fmtNum(ruas.lebar_jalan_m,1)+' m' : ''}`,
+    ].forEach(line=>{ doc.text(line, 14, y); y += 5; });
+    y += 3;
+
+    function sectionTitle(judul){
+      if(y > pageH - 30){ doc.addPage(); y = 16; }
+      doc.setFontSize(11.5);
+      doc.setTextColor(10,32,54);
+      doc.text(judul, 14, y);
+      doc.setTextColor(0,0,0);
+      y += 2;
+    }
+    function tableOrNote(kolom, rows, emptyMsg){
+      if(!rows.length){
+        doc.setFontSize(9); doc.setTextColor(150,150,150);
+        doc.text(emptyMsg, 14, y+4);
+        doc.setTextColor(0,0,0);
+        y += 10;
+        return;
+      }
+      doc.autoTable({
+        startY: y+3,
+        head: [kolom.map(k=>k.header)],
+        body: rows.map(r=>kolom.map(k=>{ const val = r[k.key]; return val===null||val===undefined||val===''? '—' : String(val); })),
+        styles: { fontSize: 8, cellPadding: 2 },
+        headStyles: { fillColor: [10,32,54] },
+        margin: { left: 14, right: 14 },
+      });
+      y = doc.lastAutoTable.finalY + 8;
+    }
+
+    // 1. Kondisi jalan per segmen (survei terakhir tiap segmen)
+    sectionTitle('Kondisi Jalan per Segmen (Survei Terakhir)');
+    const kondisiPerSegmen = segmen.map(s=>{
+      const riwayat = survei.filter(sv=>sv.segmen_id===s.id).slice().sort((a,b)=>new Date(b.tanggal_survei)-new Date(a.tanggal_survei));
+      const terbaru = riwayat[0];
+      return {
+        segmen: s.kode_segmen || '—',
+        sta: `${fmtNum(s.sta_awal,3)}–${fmtNum(s.sta_akhir,3)}`,
+        kondisi: terbaru ? (KONDISI_LABEL[terbaru.kondisi]||terbaru.kondisi) : 'Belum disurvei',
+        tanggal: terbaru ? fmtDate(terbaru.tanggal_survei) : '—',
+      };
+    });
+    tableOrNote(
+      [{header:'Segmen',key:'segmen'},{header:'STA',key:'sta'},{header:'Kondisi',key:'kondisi'},{header:'Tgl Survei Terakhir',key:'tanggal'}],
+      kondisiPerSegmen, 'Belum ada data segmen/survei untuk ruas ini.');
+
+    // 2. Anggaran per tahun
+    sectionTitle('Anggaran per Tahun');
+    tableOrNote(
+      [{header:'Tahun',key:'tahun'},{header:'Sumber Dana',key:'sumber'},{header:'Pagu',key:'pagu'},{header:'Realisasi',key:'realisasi'}],
+      anggaran.map(a=>({ tahun:a.tahun, sumber:(a.sumber_dana||'—').replaceAll('_',' '), pagu:fmtRp(a.pagu), realisasi:fmtRp(a.realisasi) })),
+      'Belum ada data anggaran untuk ruas ini.');
+
+    // 3. Riwayat kegiatan penanganan
+    sectionTitle('Riwayat Kegiatan Penanganan');
+    tableOrNote(
+      [{header:'Jenis',key:'jenis'},{header:'STA',key:'sta'},{header:'Mulai',key:'mulai'},{header:'Selesai',key:'selesai'},{header:'Pelaksana',key:'pelaksana'},{header:'Biaya',key:'biaya'}],
+      kegiatan.map(k=>({
+        jenis: (k.jenis_penanganan||'—').replaceAll('_',' '),
+        sta: `${fmtNum(k.sta_awal,3)}–${fmtNum(k.sta_akhir,3)}`,
+        mulai: fmtDate(k.tanggal_penanganan),
+        selesai: k.tanggal_selesai? fmtDate(k.tanggal_selesai) : '—',
+        pelaksana: k.kontraktor_pelaksana || '—',
+        biaya: k.biaya? fmtRp(k.biaya) : '—',
+      })),
+      'Belum ada kegiatan penanganan untuk ruas ini.');
+
+    // 4. Riwayat kejadian bencana
+    sectionTitle('Riwayat Kejadian Bencana');
+    tableOrNote(
+      [{header:'Jenis',key:'jenis'},{header:'Tanggal',key:'tanggal'},{header:'Tingkat Kerusakan',key:'tingkat'},{header:'Status Penanganan',key:'status'}],
+      bencana.map(b=>({
+        jenis: (b.jenis_kejadian||'—').replaceAll('_',' '),
+        tanggal: fmtDate(b.tanggal_kejadian),
+        tingkat: (b.tingkat_kerusakan||'—').replaceAll('_',' '),
+        status: b.penanganan_id? (b.penanganan_status||'—').replaceAll('_',' ') : 'Belum ditangani',
+      })),
+      'Belum ada kejadian bencana tercatat untuk ruas ini.');
+
+    doc.save(`laporan_ruas_${(ruas.kode_ruas||ruas.id||'').toString().replaceAll('.','-')}.pdf`);
+  }catch(e){ console.error('[export-laporan-ruas] gagal:', e); alert('Gagal membuat laporan PDF: '+e.message); }
+}
 function exportButtons(onExcel, onPdf){
   return `<div class="flex gap-2">
     <button type="button" data-export="excel" class="btn-ghost !py-2 !px-3 text-[12.5px]">${icon('doc','w-3.5 h-3.5')} Excel</button>
@@ -593,6 +701,8 @@ const api = {
   async kondisiTerkini(){ const {data,error} = await sb.from('v_kondisi_terkini').select('*'); if(error) throw error; return data; },
   async rekapKondisiKabupaten(){ const {data,error} = await sb.from('v_rekap_kondisi_kabupaten').select('*'); if(error) throw error; return data; },
   async trenKondisiTahunan(){ const {data,error} = await sb.from('v_tren_kondisi_tahunan').select('*'); if(error) throw error; return data; },
+  async trenKondisiTahunanKabupaten(){ const {data,error} = await sb.from('v_tren_kondisi_tahunan_kabupaten').select('*'); if(error) throw error; return data; },
+  async rekapKegiatanTahunanKabupaten(){ const {data,error} = await sb.from('v_rekap_kegiatan_tahunan_kabupaten').select('*'); if(error) throw error; return data; },
   async skorPrioritas(limit=10){ const {data,error} = await sb.from('v_skor_prioritas').select('*').order('skor_prioritas',{ascending:false}).limit(limit); if(error) throw error; return data; },
   async skorPrioritasAll(){ const {data,error} = await sb.from('v_skor_prioritas').select('*'); if(error) throw error; return data; },
   async insertSurvei(payload){ const {error} = await sb.from('survei_kondisi').insert(payload); if(error) throw error; },
@@ -717,6 +827,7 @@ async function initAuth(){
 // --- 6. SHELL / NAVBAR -------------------------------------------------
 const NAV_ITEMS = [
   {id:'dashboard', label:'Dashboard', icon:'grid'},
+  {id:'perbandingan', label:'Perbandingan Tahun', icon:'chart'},
   {id:'peta', label:'Peta Jaringan', icon:'map'},
   {id:'ruas', label:'Ruas Jalan', icon:'road'},
   {id:'kegiatan', label:'Kegiatan Penanganan', icon:'wrench'},
@@ -901,7 +1012,7 @@ async function wireNotifBell(){
 }
 
 function routeView(){
-  const map = {dashboard:viewDashboard, peta:viewPeta, ruas:viewRuas, kegiatan:viewKegiatan, dokumen:viewDokumen, aset:viewAset, anggaran:viewAnggaran, penugasan:viewPenugasan, bencana:viewBencana, admin:viewAdmin, log:viewLogAktivitas};
+  const map = {dashboard:viewDashboard, perbandingan:viewPerbandingan, peta:viewPeta, ruas:viewRuas, kegiatan:viewKegiatan, dokumen:viewDokumen, aset:viewAset, anggaran:viewAnggaran, penugasan:viewPenugasan, bencana:viewBencana, admin:viewAdmin, log:viewLogAktivitas};
   (map[state.route]||viewDashboard)();
 }
 
@@ -1229,6 +1340,131 @@ async function viewDashboard(){
     if(rekapKondisi.length===0 && rekapAnggaran.length===0){
       v.insertAdjacentHTML('beforeend', emptyStateNotice());
     }
+  }catch(err){ v.innerHTML = errorPanel(err); }
+}
+// --- 8b. VIEW: PERBANDINGAN / REKAP LINTAS TAHUN ----------------------------
+// Poin 8 rencana pengembangan: membandingkan kondisi jalan, anggaran, dan
+// kegiatan penanganan tahun ini vs tahun sebelumnya (atau tahun mana pun),
+// per kabupaten/kota. Murni membaca view agregasi baru (read-only).
+async function viewPerbandingan(){
+  const v = document.getElementById('view');
+  v.innerHTML = `<div class="skel h-20 w-full mb-5"></div><div class="skel h-72 w-full mb-5"></div><div class="skel h-72 w-full"></div>`;
+  try{
+    const [trenKab, anggaranKab, kegiatanKab] = await Promise.all([
+      api.trenKondisiTahunanKabupaten(), api.rekapAnggaranKabupaten(), api.rekapKegiatanTahunanKabupaten().catch(()=>[])
+    ]);
+    const tahunOpt = [...new Set([...trenKab.map(r=>r.tahun), ...anggaranKab.map(r=>r.tahun), ...kegiatanKab.map(r=>r.tahun)])].sort((a,b)=>b-a);
+    if(tahunOpt.length < 2){
+      v.innerHTML = `
+      <div class="mb-5"><h1 class="font-display font-extrabold text-2xl text-ink-900">Perbandingan Tahun</h1>
+      <p class="text-ink-500 text-[13.5px]">Bandingkan kondisi jalan, anggaran, dan kegiatan penanganan antar tahun, per kabupaten/kota</p></div>
+      <div class="card p-8 text-center text-ink-400 text-[13.5px]">Perbandingan baru bisa ditampilkan setelah ada data dari minimal 2 tahun berbeda (survei kondisi, anggaran, atau kegiatan penanganan).</div>`;
+      return;
+    }
+    const tahunA = state.perbandinganTahunA && tahunOpt.includes(Number(state.perbandinganTahunA)) ? Number(state.perbandinganTahunA) : tahunOpt[1];
+    const tahunB = state.perbandinganTahunB && tahunOpt.includes(Number(state.perbandinganTahunB)) ? Number(state.perbandinganTahunB) : tahunOpt[0];
+    state.perbandinganTahunA = tahunA; state.perbandinganTahunB = tahunB;
+
+    const kabNames = [...new Set([...trenKab.map(r=>r.kabupaten), ...anggaranKab.map(r=>r.kabupaten), ...kegiatanKab.map(r=>r.kabupaten)])].sort();
+
+    // % kemantapan (baik + sedang) per kabupaten per tahun
+    function persenMantap(tahun, kab){
+      const rows = trenKab.filter(r=>r.tahun===tahun && r.kabupaten===kab);
+      const total = rows.reduce((s,r)=>s+Number(r.total_panjang_km||0),0);
+      if(!total) return null;
+      const mantap = rows.filter(r=>r.kondisi==='baik'||r.kondisi==='sedang').reduce((s,r)=>s+Number(r.total_panjang_km||0),0);
+      return mantap/total*100;
+    }
+    const kondisiRows = kabNames.map(kab=>({ kabupaten:kab, a: persenMantap(tahunA,kab), b: persenMantap(tahunB,kab) }))
+      .filter(r=>r.a!==null || r.b!==null);
+
+    function anggaranOf(tahun, kab){ return anggaranKab.find(r=>r.tahun===tahun && r.kabupaten===kab) || null; }
+    const anggaranRows = kabNames.map(kab=>({ kabupaten:kab, a: anggaranOf(tahunA,kab), b: anggaranOf(tahunB,kab) }))
+      .filter(r=>r.a || r.b);
+
+    function kegiatanOf(tahun, kab){ return kegiatanKab.find(r=>r.tahun===tahun && r.kabupaten===kab) || null; }
+    const kegiatanRows = kabNames.map(kab=>({ kabupaten:kab, a: kegiatanOf(tahunA,kab), b: kegiatanOf(tahunB,kab) }))
+      .filter(r=>r.a || r.b);
+
+    function deltaBadge(delta, satuan='pp', biggerIsBetter=true){
+      if(delta===null || delta===undefined || isNaN(delta)) return `<span class="text-ink-400 text-[12px]">—</span>`;
+      const naik = delta > 0.05, turun = delta < -0.05;
+      const baik = biggerIsBetter ? naik : turun;
+      const buruk = biggerIsBetter ? turun : naik;
+      const color = baik? 'var(--good,#2E8B57)' : buruk? 'var(--bad)' : '#8B96A6';
+      const panah = naik? '▲' : turun? '▼' : '•';
+      return `<span class="font-mono text-[12px] font-semibold" style="color:${color}">${panah} ${delta>0?'+':''}${fmtNum(delta,1)}${satuan}</span>`;
+    }
+
+    v.innerHTML = `
+    <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+      <div><h1 class="font-display font-extrabold text-2xl text-ink-900">Perbandingan Tahun</h1>
+      <p class="text-ink-500 text-[13.5px]">Bandingkan kondisi jalan, anggaran, dan kegiatan penanganan antar tahun, per kabupaten/kota</p></div>
+      <div id="perbandingan-export"></div>
+    </div>
+    <div class="card p-4 mb-5 flex items-center flex-wrap gap-3">
+      <span class="text-[12.5px] font-semibold text-ink-600">Bandingkan tahun</span>
+      <select id="pb-tahun-a" class="max-w-[120px]">${tahunOpt.map(t=>`<option value="${t}" ${t===tahunA?'selected':''}>${t}</option>`).join('')}</select>
+      <span class="text-ink-400 text-[12.5px]">vs</span>
+      <select id="pb-tahun-b" class="max-w-[120px]">${tahunOpt.map(t=>`<option value="${t}" ${t===tahunB?'selected':''}>${t}</option>`).join('')}</select>
+    </div>
+
+    <div class="card p-5 mb-5">
+      <h3 class="font-display font-bold text-[15px] mb-1">Kemantapan Jalan per Kabupaten/Kota</h3>
+      <p class="text-ink-400 text-[12px] mb-4">% panjang ruas berkondisi baik + sedang, dari total panjang tersurvei</p>
+      ${!kondisiRows.length? `<p class="text-ink-400 text-[13px]">Belum ada data survei kondisi untuk salah satu atau kedua tahun ini.</p>` : `
+      <div style="height:${Math.max(220, kondisiRows.length*34)}px" class="mb-4"><canvas id="chart-pb-kondisi"></canvas></div>
+      <div class="overflow-x-auto"><table><thead><tr><th>Kabupaten/Kota</th><th>${tahunA}</th><th>${tahunB}</th><th>Perubahan</th></tr></thead>
+      <tbody>${kondisiRows.map(r=>`<tr><td class="font-medium">${r.kabupaten}</td>
+        <td class="font-mono">${r.a!==null? fmtNum(r.a,1)+'%':'—'}</td>
+        <td class="font-mono">${r.b!==null? fmtNum(r.b,1)+'%':'—'}</td>
+        <td>${deltaBadge(r.a!==null&&r.b!==null? r.b-r.a : null, 'pp', true)}</td></tr>`).join('')}
+      </tbody></table></div>`}
+    </div>
+
+    <div class="card p-5 mb-5">
+      <h3 class="font-display font-bold text-[15px] mb-1">Realisasi Anggaran per Kabupaten/Kota</h3>
+      <p class="text-ink-400 text-[12px] mb-4">Pagu, realisasi, dan % realisasi tiap tahun</p>
+      ${!anggaranRows.length? `<p class="text-ink-400 text-[13px]">Belum ada data anggaran untuk salah satu atau kedua tahun ini.</p>` : `
+      <div class="overflow-x-auto"><table><thead><tr><th>Kabupaten/Kota</th><th>Pagu ${tahunA}</th><th>Realisasi ${tahunA}</th><th>% ${tahunA}</th><th>Pagu ${tahunB}</th><th>Realisasi ${tahunB}</th><th>% ${tahunB}</th><th>Perubahan %</th></tr></thead>
+      <tbody>${anggaranRows.map(r=>`<tr><td class="font-medium">${r.kabupaten}</td>
+        <td class="font-mono">${r.a? fmtRp(r.a.total_pagu):'—'}</td><td class="font-mono">${r.a? fmtRp(r.a.total_realisasi):'—'}</td><td class="font-mono">${r.a? fmtNum(r.a.persen_realisasi,1)+'%':'—'}</td>
+        <td class="font-mono">${r.b? fmtRp(r.b.total_pagu):'—'}</td><td class="font-mono">${r.b? fmtRp(r.b.total_realisasi):'—'}</td><td class="font-mono">${r.b? fmtNum(r.b.persen_realisasi,1)+'%':'—'}</td>
+        <td>${deltaBadge(r.a&&r.b? Number(r.b.persen_realisasi||0)-Number(r.a.persen_realisasi||0) : null, 'pp', true)}</td></tr>`).join('')}
+      </tbody></table></div>`}
+    </div>
+
+    <div class="card p-5">
+      <h3 class="font-display font-bold text-[15px] mb-1">Kegiatan Penanganan per Kabupaten/Kota</h3>
+      <p class="text-ink-400 text-[12px] mb-4">Jumlah kegiatan dan total biaya, berdasarkan tahun anggaran</p>
+      ${!kegiatanRows.length? `<p class="text-ink-400 text-[13px]">Belum ada data kegiatan penanganan untuk salah satu atau kedua tahun ini. Pastikan migrasi <code class="font-mono text-[11.5px]">v_rekap_kegiatan_tahunan_kabupaten</code> sudah dijalankan di Supabase.</p>` : `
+      <div class="overflow-x-auto"><table><thead><tr><th>Kabupaten/Kota</th><th>Jumlah ${tahunA}</th><th>Biaya ${tahunA}</th><th>Jumlah ${tahunB}</th><th>Biaya ${tahunB}</th><th>Perubahan Jumlah</th></tr></thead>
+      <tbody>${kegiatanRows.map(r=>`<tr><td class="font-medium">${r.kabupaten}</td>
+        <td class="font-mono">${r.a? fmtNum(r.a.jumlah_kegiatan):'—'}</td><td class="font-mono">${r.a? fmtRp(r.a.total_biaya):'—'}</td>
+        <td class="font-mono">${r.b? fmtNum(r.b.jumlah_kegiatan):'—'}</td><td class="font-mono">${r.b? fmtRp(r.b.total_biaya):'—'}</td>
+        <td>${deltaBadge(r.a&&r.b? Number(r.b.jumlah_kegiatan||0)-Number(r.a.jumlah_kegiatan||0) : null, '', true)}</td></tr>`).join('')}
+      </tbody></table></div>`}
+    </div>`;
+
+    document.getElementById('pb-tahun-a').addEventListener('change', (e)=>{ state.perbandinganTahunA = e.target.value; viewPerbandingan(); });
+    document.getElementById('pb-tahun-b').addEventListener('change', (e)=>{ state.perbandinganTahunB = e.target.value; viewPerbandingan(); });
+
+    if(kondisiRows.length){
+      mkChart('chart-pb-kondisi', 'bar', {
+        labels: kondisiRows.map(r=>r.kabupaten),
+        datasets: [
+          {label:String(tahunA), backgroundColor:'#8FA3C2', data:kondisiRows.map(r=>r.a!==null?Math.round(r.a*10)/10:0), borderRadius:4},
+          {label:String(tahunB), backgroundColor:'#F2A93B', data:kondisiRows.map(r=>r.b!==null?Math.round(r.b*10)/10:0), borderRadius:4},
+        ]
+      }, { indexAxis:'y', scales:{x:{min:0,max:100,ticks:{callback:v=>v+'%'}}, y:{ticks:{font:{size:10.5}}}} });
+    }
+
+    document.getElementById('perbandingan-export').innerHTML = exportButtons();
+    wireExportButtons(document.getElementById('perbandingan-export'),
+      ()=>exportExcel(kondisiRows.map(r=>({ 'Kabupaten/Kota': r.kabupaten, [`% Mantap ${tahunA}`]: r.a!=null?fmtNum(r.a,1):'', [`% Mantap ${tahunB}`]: r.b!=null?fmtNum(r.b,1):'' })), 'sijalan_perbandingan_kondisi', 'Perbandingan Kondisi'),
+      ()=>exportPdfTabel(`Perbandingan Kemantapan Jalan ${tahunA} vs ${tahunB}`, [
+        {header:'Kabupaten/Kota', key:'kabupaten'}, {header:`% Mantap ${tahunA}`, key:'a'}, {header:`% Mantap ${tahunB}`, key:'b'},
+      ], kondisiRows.map(r=>({ kabupaten:r.kabupaten, a: r.a!=null?fmtNum(r.a,1)+'%':'—', b: r.b!=null?fmtNum(r.b,1)+'%':'—' })), 'sijalan_perbandingan_kondisi'));
   }catch(err){ v.innerHTML = errorPanel(err); }
 }
 function kpiCard(label, value, iconName, sub){
@@ -1644,7 +1880,10 @@ async function viewRuasDetail(id){
         <h1 class="font-display font-extrabold text-2xl text-ink-900 mt-0.5">${ruas.nama_ruas}</h1>
         <p class="text-ink-500 text-[13.5px] mt-1">${ruas.kabupaten?.nama||'—'} · <span class="capitalize">${ruas.status_jalan||'—'}</span> · ${ruas.fungsi_jalan? 'Fungsi '+ruas.fungsi_jalan : ''} · ${fmtNum(ruas.panjang_km,1)} km${ruas.lebar_jalan_m!=null? ' · Lebar '+fmtNum(ruas.lebar_jalan_m,1)+' m' : ''}</p>
       </div>
-      ${isEditor()?`<div class="flex gap-2"><button id="btn-add-lalin-ruas" class="btn-ghost">+ Data Lalu Lintas</button><button id="btn-add-survei" class="btn-ghost">+ Survei Kondisi</button><button id="btn-add-kegiatan" class="btn-primary">+ Kegiatan Penanganan</button></div>`:''}
+      <div class="flex gap-2 flex-wrap">
+        <button id="btn-export-laporan-ruas" class="btn-ghost !py-2 !px-3 text-[12.5px]">${icon('doc','w-3.5 h-3.5')} Laporan PDF</button>
+        ${isEditor()?`<button id="btn-add-lalin-ruas" class="btn-ghost">+ Data Lalu Lintas</button><button id="btn-add-survei" class="btn-ghost">+ Survei Kondisi</button><button id="btn-add-kegiatan" class="btn-primary">+ Kegiatan Penanganan</button>`:''}
+      </div>
     </div>
 
     <div class="grid lg:grid-cols-3 gap-5">
@@ -1753,6 +1992,7 @@ async function viewRuasDetail(id){
       </div>
     </div>`;
     document.getElementById('back-ruas').addEventListener('click', ()=>{ state.selectedRuasId=null; renderShell(); });
+    document.getElementById('btn-export-laporan-ruas').addEventListener('click', ()=>exportLaporanRuasPdf(ruas, segmen, kegiatan, survei, anggaran, bencana));
     hydrateFotoThumbs(document.getElementById('kegiatan-list'));
     hydrateFotoThumbs(document.getElementById('survei-list'));
     if(isEditor()){
