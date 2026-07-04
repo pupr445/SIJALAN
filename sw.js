@@ -13,7 +13,16 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_FILES)).catch(()=>{})
   );
-  self.skipWaiting();
+  // Catatan (Usulan #6 — notifikasi pembaruan aplikasi): skipWaiting() TIDAK
+  // dipanggil otomatis di sini lagi. Service worker baru akan menunggu di
+  // status "waiting" sampai pengguna menekan tombol "Muat Ulang" pada banner
+  // pembaruan (lihat index.html), yang mengirim pesan SKIP_WAITING ke sini.
+  // Ini mencegah aplikasi berpindah versi diam-diam saat pengguna sedang
+  // mengisi form di tengah proses deploy baru.
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
