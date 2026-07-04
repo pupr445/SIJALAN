@@ -708,6 +708,17 @@ const api = {
   async insertSurvei(payload){ const {error} = await sb.from('survei_kondisi').insert(payload); if(error) throw error; },
   async updateSurvei(id, payload){ const {error} = await sb.from('survei_kondisi').update(payload).eq('id',id); if(error) throw error; },
   async deleteSurvei(id){ const {error} = await sb.from('survei_kondisi').delete().eq('id',id); if(error) throw error; },
+  // Cek non-blocking: apakah segmen ini sudah pernah disurvei pada tanggal yang sama (oleh tim/orang lain).
+  // Dipakai untuk menampilkan peringatan saja, bukan untuk memblokir penyimpanan (satu segmen boleh
+  // disurvei lebih dari satu tim/orang pada hari yang sama, mis. survei ulang untuk verifikasi).
+  async surveiCekDuplikat(segmenId, tanggal, excludeId=null){
+    if(!segmenId || !tanggal) return [];
+    let q = sb.from('survei_kondisi').select('id,surveyor,kondisi').eq('segmen_id', segmenId).eq('tanggal_survei', tanggal);
+    if(excludeId) q = q.neq('id', excludeId);
+    const {data,error} = await q;
+    if(error) throw error;
+    return data||[];
+  },
   async surveiByRuas(ruasId){
     const {data,error} = await sb.from('survei_kondisi').select('*, segmen_jalan!inner(id,kode_segmen,sta_awal,sta_akhir,ruas_id)').eq('segmen_jalan.ruas_id', ruasId).order('tanggal_survei',{ascending:false});
     if(error) throw error; return data;
@@ -733,7 +744,21 @@ const api = {
   async kegiatanByRuas(ruasId){ const {data,error} = await sb.from('v_kegiatan_penanganan').select('*').eq('ruas_id', ruasId).order('tanggal_penanganan',{ascending:false}); if(error) throw error; return data; },
   async penangananById(id){ const {data,error} = await sb.from('penanganan').select('*').eq('id',id).single(); if(error) throw error; return data; },
   async insertPenanganan(payload){ const {data,error} = await sb.from('penanganan').insert(payload).select().single(); if(error) throw error; return data; },
-  async updatePenanganan(id, payload){ const {error} = await sb.from('penanganan').update(payload).eq('id',id); if(error) throw error; },
+  // Optimistic locking: kalau expectedUpdatedAt diisi, UPDATE hanya berhasil jika baris di database
+  // masih punya updated_at yang sama persis dengan yang terakhir dibaca user (belum diubah orang lain
+  // sejak form dibuka). Kalau sudah berubah, tidak ada baris yang ter-update -> lempar error konflik
+  // supaya UI bisa minta user memuat ulang data, alih-alih menimpa perubahan orang lain diam-diam.
+  async updatePenanganan(id, payload, expectedUpdatedAt=null){
+    let q = sb.from('penanganan').update(payload).eq('id',id);
+    if(expectedUpdatedAt) q = q.eq('updated_at', expectedUpdatedAt);
+    const {data,error} = await q.select('id');
+    if(error) throw error;
+    if(expectedUpdatedAt && (!data || data.length===0)){
+      const err = new Error('Data ini sudah diubah oleh orang lain sejak Anda membuka form. Silakan muat ulang untuk melihat perubahan terbaru sebelum menyimpan lagi.');
+      err.code = 'STALE_UPDATE';
+      throw err;
+    }
+  },
   async deletePenanganan(id){ const {error} = await sb.from('penanganan').delete().eq('id',id); if(error) throw error; },
   async subKegiatanRef(jenis){ const {data,error} = await sb.from('sub_kegiatan_ref').select('*').eq('jenis_penanganan',jenis).order('urutan'); if(error) throw error; return data; },
 
@@ -2169,6 +2194,12 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
           <option value="lainnya">Lainnya (isi manual)</option>
         </select><input id="sv-metode-lainnya" class="hidden mt-2" placeholder="Tuliskan metode survei…"></div>
       </div>
+      <div>
+        <label class="text-[12.5px] font-semibold text-ink-600">Surveyor</label>
+        <p class="text-[11.5px] text-ink-400 mt-0.5 mb-1.5">Nama petugas yang mensurvei. Kalau disurvei sebagai tim, tuliskan semua nama dipisah koma (mis. "Budi, Siti, Ahmad").</p>
+        <input id="sv-surveyor" placeholder="mis. Budi, Siti, Ahmad" value="${editData?.surveyor||''}">
+      </div>
+      <div id="sv-duplikat-warn" class="hidden text-[12.5px] bg-[#FCF1DF] text-[#8A5A0E] rounded-lg px-3 py-2"></div>
       <div><label class="text-[12.5px] font-semibold text-ink-600">Catatan</label><textarea id="sv-catatan" rows="2">${editData?.catatan||''}</textarea></div>
       <div>
         <label class="text-[12.5px] font-semibold text-ink-600">Link Dokumentasi</label>
@@ -2191,6 +2222,29 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
   const existingFotoPaths = editData?.foto_paths?.length ? editData.foto_paths : (editData?.foto_path ? [editData.foto_path] : []);
   const fotoPicker = wireMultiPhotoPicker(overlay.querySelector('#sv-foto'), overlay.querySelector('#sv-foto-existing'), overlay.querySelector('#sv-foto-new'), existingFotoPaths);
   hydrateFotoThumbs(overlay);
+
+  // Opsi A: peringatan non-blocking kalau segmen ini sudah pernah disurvei pada tanggal yang sama.
+  // Tidak memblokir simpan — bisa jadi memang survei tim/kedua yang sah pada hari yang sama.
+  const dupWarnBox = overlay.querySelector('#sv-duplikat-warn');
+  async function cekDuplikatSurvei(){
+    const segId = overlay.querySelector('#sv-segmen').value;
+    const tgl = overlay.querySelector('#sv-tanggal').value;
+    if(!segId || !tgl){ dupWarnBox.classList.add('hidden'); return; }
+    try{
+      const existing = await api.surveiCekDuplikat(segId, tgl, editData?.id||null);
+      if(existing.length){
+        const daftar = existing.map(x=>`${x.surveyor||'surveyor tidak diisi'} (${KONDISI_LABEL[x.kondisi]||x.kondisi})`).join('; ');
+        dupWarnBox.textContent = `⚠ Sudah ada survei untuk segmen ini pada tanggal yang sama, oleh ${daftar}. Anda tetap bisa lanjutkan simpan kalau ini memang survei tim/kedua yang sah.`;
+        dupWarnBox.classList.remove('hidden');
+      } else {
+        dupWarnBox.classList.add('hidden');
+      }
+    }catch(e){ /* cek ini murni informasional, jangan ganggu alur kalau gagal */ }
+  }
+  overlay.querySelector('#sv-segmen').addEventListener('change', cekDuplikatSurvei);
+  overlay.querySelector('#sv-tanggal').addEventListener('change', cekDuplikatSurvei);
+  cekDuplikatSurvei();
+
   overlay.querySelector('#form-survei').addEventListener('submit', async (e)=>{
     e.preventDefault();
     const errBox = overlay.querySelector('#sv-err');
@@ -2214,6 +2268,7 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
         kondisi: overlay.querySelector('#sv-kondisi').value,
         nilai_iri: overlay.querySelector('#sv-iri').value || null,
         metode_survei: getMetodeSurvei(),
+        surveyor: overlay.querySelector('#sv-surveyor').value || null,
         catatan: overlay.querySelector('#sv-catatan').value || null,
         link_dokumentasi: overlay.querySelector('#sv-link').value || null,
         foto_paths: fotoPaths,
@@ -2432,13 +2487,25 @@ function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=nul
         kejadian_bencana_id: overlay.querySelector('#kg-jenis').value === 'tanggap_darurat' ? (overlay.querySelector('#kg-bencana').value || null) : null,
       };
       if(isEdit){ payload.segmen_id = editData?.segmen_id ?? null; }
-      if(isEdit){ await api.updatePenanganan(editData.id, payload); }
+      if(isEdit){ await api.updatePenanganan(editData.id, payload, editData?.updated_at || null); }
       else{ payload.created_by = state.user.id; await api.insertPenanganan(payload); }
       overlay.remove();
       if(onSaved) onSaved(); else viewKegiatan();
     }catch(err){
       submitBtn.textContent = submitLabel; submitBtn.disabled = false;
-      errBox.textContent = err.message; errBox.classList.remove('hidden');
+      if(err.code === 'STALE_UPDATE'){
+        errBox.innerHTML = `${err.message} <button type="button" id="kg-err-reload" class="underline font-semibold ml-1">Muat ulang</button>`;
+        errBox.classList.remove('hidden');
+        errBox.querySelector('#kg-err-reload')?.addEventListener('click', async ()=>{
+          try{
+            const fresh = await api.penangananById(editData.id);
+            overlay.remove();
+            openKegiatanFormModal(ruasList, defaultRuas, {...editData, ...fresh}, onSaved);
+          }catch(e){ /* biarkan modal lama terbuka kalau gagal memuat ulang */ }
+        });
+      } else {
+        errBox.textContent = err.message; errBox.classList.remove('hidden');
+      }
     }
   });
 }
