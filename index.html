@@ -225,7 +225,25 @@ function exportExcel(rows, filename='data', sheetName='Data'){
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0,31));
     XLSX.writeFile(wb, `${filename}.xlsx`);
-  }catch(e){ console.error('[export-excel] gagal:', e); alert('Gagal membuat file Excel: '+e.message); }
+  }catch(e){ console.error('[export-excel] gagal:', e); alert('Gagal membuat file Excel: '+terjemahkanErrorDb(e)); }
+}
+// exportExcelMultiSheet(sheets, filename): satu file .xlsx dengan beberapa sheet
+// sekaligus — dipakai untuk export gabungan per kabupaten (poin 9): sheet Ruas
+// Jalan + Kegiatan Penanganan + Anggaran Tahunan dalam satu file.
+// sheets: array of {name, rows}. Sheet dengan rows kosong tetap dibuat (header saja)
+// supaya penerima laporan tahu bagian itu memang tidak ada datanya, bukan gagal export.
+function exportExcelMultiSheet(sheets, filename='data'){
+  try{
+    const adaIsi = sheets.some(s=>s.rows && s.rows.length);
+    if(!adaIsi){ alert('Tidak ada data untuk diekspor.'); return; }
+    const wb = XLSX.utils.book_new();
+    sheets.forEach(s=>{
+      const rows = (s.rows && s.rows.length)? s.rows : [{'Keterangan':'Tidak ada data'}];
+      const ws = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, s.name.slice(0,31));
+    });
+    XLSX.writeFile(wb, `${filename}.xlsx`);
+  }catch(e){ console.error('[export-excel-multi] gagal:', e); alert('Gagal membuat file Excel: '+terjemahkanErrorDb(e)); }
 }
 // exportPdfTabel(judul, kolom, rows, filename) membuat PDF tabel sederhana.
 // kolom: array {header, key}. rows: array of object.
@@ -355,7 +373,90 @@ function exportLaporanRuasPdf(ruas, segmen, kegiatan, survei, anggaran, bencana)
       'Belum ada kejadian bencana tercatat untuk ruas ini.');
 
     doc.save(`laporan_ruas_${(ruas.kode_ruas||ruas.id||'').toString().replaceAll('.','-')}.pdf`);
-  }catch(e){ console.error('[export-laporan-ruas] gagal:', e); alert('Gagal membuat laporan PDF: '+e.message); }
+  }catch(e){ console.error('[export-laporan-ruas] gagal:', e); alert('Gagal membuat laporan PDF: '+terjemahkanErrorDb(e)); }
+}
+// exportLaporanKabupatenPdf(kabNama, ruasKab, kegiatanKab, anggaranKab): laporan PDF
+// GABUNGAN untuk satu kabupaten (poin 9 rencana pengembangan) — daftar ruas +
+// kegiatan penanganan + anggaran kabupaten tersebut, disatukan jadi satu dokumen.
+// Data yang dipakai sudah ada (ruas_jalan, v_kegiatan_penanganan, anggaran_tahunan),
+// hanya digabung tampilannya; tidak menambah tabel/kolom baru di database.
+function exportLaporanKabupatenPdf(kabNama, ruasKab, kegiatanKab, anggaranKab){
+  try{
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation:'portrait' });
+    const pageH = doc.internal.pageSize.getHeight();
+    let y = 16;
+
+    doc.setFontSize(15);
+    doc.text(`Laporan Gabungan — ${kabNama}`, 14, y); y += 6.5;
+    doc.setFontSize(9);
+    doc.setTextColor(120,120,120);
+    doc.text(`SIJALAN · Diekspor ${new Date().toLocaleString('id-ID')}`, 14, y); y += 8;
+    doc.setTextColor(0,0,0);
+
+    function sectionTitle(judul){
+      if(y > pageH - 30){ doc.addPage(); y = 16; }
+      doc.setFontSize(11.5);
+      doc.setTextColor(10,32,54);
+      doc.text(judul, 14, y);
+      doc.setTextColor(0,0,0);
+      y += 2;
+    }
+    function tableOrNote(kolom, rows, emptyMsg){
+      if(!rows.length){
+        doc.setFontSize(9); doc.setTextColor(150,150,150);
+        doc.text(emptyMsg, 14, y+4);
+        doc.setTextColor(0,0,0);
+        y += 10;
+        return;
+      }
+      doc.autoTable({
+        startY: y+3,
+        head: [kolom.map(k=>k.header)],
+        body: rows.map(r=>kolom.map(k=>{ const val = r[k.key]; return val===null||val===undefined||val===''? '—' : String(val); })),
+        styles: { fontSize: 7.5, cellPadding: 2 },
+        headStyles: { fillColor: [10,32,54] },
+        margin: { left: 14, right: 14 },
+      });
+      y = doc.lastAutoTable.finalY + 8;
+    }
+
+    // 1. Daftar ruas jalan di kabupaten ini
+    sectionTitle(`Daftar Ruas Jalan (${ruasKab.length})`);
+    tableOrNote(
+      [{header:'Kode',key:'kode'},{header:'Nama Ruas',key:'nama'},{header:'Status',key:'status'},{header:'Fungsi',key:'fungsi'},{header:'Panjang',key:'panjang'}],
+      ruasKab.map(r=>({ kode:r.kode_ruas, nama:r.nama_ruas, status:r.status_jalan||'—', fungsi:r.fungsi_jalan||'—', panjang:`${fmtNum(r.panjang_km,1)} km` })),
+      'Belum ada ruas jalan terdaftar untuk kabupaten ini.');
+
+    // 2. Kegiatan penanganan di kabupaten ini
+    sectionTitle(`Kegiatan Penanganan (${kegiatanKab.length})`);
+    tableOrNote(
+      [{header:'Ruas',key:'ruas'},{header:'Jenis',key:'jenis'},{header:'Mulai',key:'mulai'},{header:'Selesai',key:'selesai'},{header:'Pelaksana',key:'pelaksana'},{header:'Biaya',key:'biaya'}],
+      kegiatanKab.map(k=>({
+        ruas: k.kode_ruas || '—',
+        jenis: (k.jenis_penanganan||'—').replaceAll('_',' '),
+        mulai: fmtDate(k.tanggal_penanganan),
+        selesai: k.tanggal_selesai? fmtDate(k.tanggal_selesai) : '—',
+        pelaksana: k.kontraktor_pelaksana || '—',
+        biaya: k.biaya? fmtRp(k.biaya) : '—',
+      })),
+      'Belum ada kegiatan penanganan tercatat untuk kabupaten ini.');
+
+    // 3. Anggaran tahunan di kabupaten ini
+    sectionTitle(`Anggaran Tahunan (${anggaranKab.length})`);
+    tableOrNote(
+      [{header:'Ruas',key:'ruas'},{header:'Tahun',key:'tahun'},{header:'Sumber Dana',key:'sumber'},{header:'Pagu',key:'pagu'},{header:'Realisasi',key:'realisasi'}],
+      anggaranKab.map(a=>({
+        ruas: a.ruas_jalan?.kode_ruas || '—',
+        tahun: a.tahun,
+        sumber: (a.sumber_dana||'—').replaceAll('_',' '),
+        pagu: fmtRp(a.pagu),
+        realisasi: fmtRp(a.realisasi),
+      })),
+      'Belum ada data anggaran tercatat untuk kabupaten ini.');
+
+    doc.save(`sijalan_gabungan_${kabNama.toString().toLowerCase().replaceAll(/[^a-z0-9]+/g,'_')}.pdf`);
+  }catch(e){ console.error('[export-laporan-kabupaten] gagal:', e); alert('Gagal membuat laporan PDF: '+terjemahkanErrorDb(e)); }
 }
 function exportButtons(onExcel, onPdf){
   return `<div class="flex gap-2">
@@ -366,6 +467,40 @@ function exportButtons(onExcel, onPdf){
 function wireExportButtons(container, onExcel, onPdf){
   container.querySelector('[data-export="excel"]')?.addEventListener('click', onExcel);
   container.querySelector('[data-export="pdf"]')?.addEventListener('click', onPdf);
+}
+
+// Pengembangan #9: export gabungan (ruas + kegiatan penanganan + anggaran) untuk
+// satu kabupaten sekaligus. Mengambil data dari sumber yang sudah ada
+// (state.ruasCache, v_kegiatan_penanganan, anggaran_tahunan) lalu menggabungkannya
+// jadi satu file Excel (3 sheet) atau satu file PDF (3 bagian).
+async function exportKabupatenGabungan(kabupatenId, kabupatenList, format){
+  if(!kabupatenId){ alert('Pilih kabupaten/kota terlebih dahulu pada filter di atas.'); return; }
+  const kab = kabupatenList.find(k=>k.id===kabupatenId);
+  const kabNama = kab?.nama || 'Kabupaten';
+  try{
+    const ruasKab = (state.ruasCache||[]).filter(r=>r.kabupaten_id===kabupatenId);
+    const [kegiatanAll, anggaranKab] = await Promise.all([api.kegiatanList(), api.anggaranByKabupaten(kabupatenId)]);
+    const kegiatanKab = kegiatanAll.filter(k=>k.kabupaten_id===kabupatenId);
+    if(format==='excel'){
+      exportExcelMultiSheet([
+        { name:'Ruas Jalan', rows: ruasKab.map(r=>({
+            'Kode Ruas': r.kode_ruas, 'Nama Ruas': r.nama_ruas, 'Status': r.status_jalan||'—',
+            'Fungsi': r.fungsi_jalan||'—', 'Panjang (km)': r.panjang_km, 'Lebar (m)': r.lebar_jalan_m,
+          })) },
+        { name:'Kegiatan Penanganan', rows: kegiatanKab.map(k=>({
+            'Kode Ruas': k.kode_ruas, 'Nama Ruas': k.nama_ruas, 'Jenis Penanganan': (k.jenis_penanganan||'—').replaceAll('_',' '),
+            'Tanggal Mulai': k.tanggal_penanganan, 'Tanggal Selesai': k.tanggal_selesai||'—', 'Status': (k.status_pekerjaan||'—').replaceAll('_',' '),
+            'Pelaksana': k.kontraktor_pelaksana||'—', 'Biaya': k.biaya,
+          })) },
+        { name:'Anggaran Tahunan', rows: anggaranKab.map(a=>({
+            'Kode Ruas': a.ruas_jalan?.kode_ruas||'—', 'Nama Ruas': a.ruas_jalan?.nama_ruas||'—', 'Tahun': a.tahun,
+            'Sumber Dana': (a.sumber_dana||'—').replaceAll('_',' '), 'Pagu': a.pagu, 'Realisasi': a.realisasi,
+          })) },
+      ], `sijalan_gabungan_${kabNama.toLowerCase().replaceAll(/[^a-z0-9]+/g,'_')}`);
+    } else {
+      exportLaporanKabupatenPdf(kabNama, ruasKab, kegiatanKab, anggaranKab);
+    }
+  }catch(err){ console.error('[export-kabupaten-gabungan] gagal:', err); alert('Gagal membuat file export: '+terjemahkanErrorDb(err)); }
 }
 
 // Pasangkan <select> yang punya opsi "Lainnya" dengan <input> teks di sebelahnya,
@@ -777,6 +912,11 @@ const api = {
   async rekapAnggaran(){ const {data,error} = await sb.from('v_rekap_anggaran_tahun').select('*'); if(error) throw error; return data; },
   async rekapAnggaranKabupaten(){ const {data,error} = await sb.from('v_rekap_anggaran_kabupaten').select('*'); if(error) throw error; return data; },
   async anggaranByRuas(ruasId){ const {data,error} = await sb.from('anggaran_tahunan').select('*').eq('ruas_id',ruasId).order('tahun',{ascending:false}); if(error) throw error; return data; },
+  // Pengembangan #9: anggaran seluruh ruas dalam satu kabupaten, untuk export gabungan.
+  async anggaranByKabupaten(kabupatenId){
+    const {data,error} = await sb.from('anggaran_tahunan').select('*, ruas_jalan!inner(id,kode_ruas,nama_ruas,kabupaten_id)').eq('ruas_jalan.kabupaten_id', kabupatenId).order('tahun',{ascending:false});
+    if(error) throw error; return data;
+  },
   async insertAnggaran(payload){ const {error} = await sb.from('anggaran_tahunan').insert(payload); if(error) throw error; },
   async updateAnggaran(id, payload){ const {error} = await sb.from('anggaran_tahunan').update(payload).eq('id',id); if(error) throw error; },
   async deleteAnggaran(id){ const {error} = await sb.from('anggaran_tahunan').delete().eq('id',id); if(error) throw error; },
@@ -1931,11 +2071,29 @@ async function viewRuas(){
       <select id="f-fungsi" class="max-w-[180px]"><option value="">Semua Fungsi</option><option value="arteri">Arteri</option><option value="kolektor">Kolektor</option><option value="lokal">Lokal</option></select>
       <select id="f-kondisi" class="max-w-[180px]"><option value="">Semua Kondisi</option>${KONDISI_ORDER.map(k=>`<option value="${k}">${KONDISI_LABEL[k]}</option>`).join('')}</select>
     </div>
+    <!-- Pengembangan #9: export gabungan (ruas + kegiatan penanganan + anggaran)
+         untuk satu kabupaten sekaligus, berguna untuk laporan ke kabupaten. -->
+    <div id="ruas-kab-export" class="hidden card p-3.5 mb-4 flex items-center justify-between flex-wrap gap-3 bg-[#F3F6FA]">
+      <div class="text-[13px] text-ink-600">Export gabungan ruas + kegiatan penanganan + anggaran untuk <span id="ruas-kab-export-nama" class="font-semibold text-ink-800"></span></div>
+      <div id="ruas-kab-export-btns"></div>
+    </div>
     <div class="card overflow-x-auto">
       <table><thead><tr><th>Kode</th><th>Nama Ruas</th><th>Kab/Kota</th><th>Status</th><th>Fungsi</th><th>Panjang</th><th>Lebar</th><th>Koordinat</th><th>Kondisi</th>${isEditor()?'<th>Aksi</th>':''}</tr></thead>
       <tbody id="ruas-tbody"></tbody></table>
     </div>
     <div id="ruas-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada ruas yang cocok dengan filter.</div>`;
+
+    const kabExportBox = document.getElementById('ruas-kab-export');
+    document.getElementById('ruas-kab-export-btns').innerHTML = exportButtons();
+    wireExportButtons(document.getElementById('ruas-kab-export-btns'),
+      ()=>exportKabupatenGabungan(document.getElementById('f-kabupaten').value, kabupaten, 'excel'),
+      ()=>exportKabupatenGabungan(document.getElementById('f-kabupaten').value, kabupaten, 'pdf'));
+    function toggleKabExportBox(){
+      const kabId = document.getElementById('f-kabupaten').value;
+      const kab = kabupaten.find(k=>k.id===kabId);
+      kabExportBox.classList.toggle('hidden', !kab);
+      if(kab) document.getElementById('ruas-kab-export-nama').textContent = kab.nama;
+    }
 
     function renderRows(){
       const q = document.getElementById('f-search').value.toLowerCase();
@@ -1985,6 +2143,8 @@ async function viewRuas(){
       });
     }
     ['f-search','f-kabupaten','f-status','f-fungsi','f-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    document.getElementById('f-kabupaten').addEventListener('input', toggleKabExportBox);
+    toggleKabExportBox();
     renderRows();
     if(isEditor()){ document.getElementById('btn-add-ruas').addEventListener('click', ()=>openRuasFormModal(kabupaten)); }
   }catch(err){ v.innerHTML = errorPanel(err); }
@@ -3910,18 +4070,80 @@ function openLalulintasRuasFormModal(ruas, segmenList, editData=null, onSaved=nu
 // --- 13c. VIEW: LOG AKTIVITAS (audit, khusus admin) ------------------------
 const AUDIT_AKSI_LABEL = {insert:'Tambah', update:'Ubah', delete:'Hapus'};
 const AUDIT_TABEL_LABEL = {survei_kondisi:'Survei Kondisi', anggaran_tahunan:'Anggaran Tahunan', penanganan:'Kegiatan Penanganan'};
-function ringkasPerubahan(lama, baru){
-  if(!lama) return 'Data baru ditambahkan.';
-  if(!baru) return 'Data dihapus.';
+// Pengembangan #8: label nama field yang dikenal, dialihkan ke Bahasa Indonesia
+// yang mudah dibaca. Field yang tidak terdaftar tetap ditampilkan otomatis
+// (underscore jadi spasi + kapital tiap kata) supaya tetap terbaca meski
+// daftar ini belum lengkap.
+const AUDIT_FIELD_LABEL = {
+  ruas_id:'Ruas Jalan', segmen_id:'Segmen', kabupaten_id:'Kabupaten/Kota',
+  tanggal_survei:'Tanggal Survei', kondisi:'Kondisi', kondisi_hasil:'Kondisi Hasil', nilai_iri:'Nilai IRI',
+  nilai_pci:'Nilai PCI', nilai_sdi:'Nilai SDI', nilai_ikp:'Nilai IKP',
+  jenis_kerusakan:'Jenis Kerusakan', metode_survei:'Metode Survei', surveyor:'Surveyor', catatan:'Catatan',
+  jenis_penanganan:'Jenis Penanganan', tahun_anggaran:'Tahun Anggaran', tahun:'Tahun',
+  tanggal_mulai:'Tanggal Mulai', tanggal_penanganan:'Tanggal Mulai', tanggal_selesai:'Tanggal Selesai',
+  volume_panjang_m:'Volume Panjang (m)', volume_luas_m2:'Volume Luas (m²)', tebal_lapisan_cm:'Tebal Lapisan (cm)',
+  sumber_dana:'Sumber Dana', status_pekerjaan:'Status Pekerjaan', kontraktor_id:'Kontraktor',
+  kontraktor_pelaksana:'Kontraktor Pelaksana', deskripsi:'Deskripsi', as_built_url:'Tautan As-Built',
+  kategori_ruang:'Kategori Ruang', sub_kegiatan:'Sub Kegiatan', sta_awal:'STA Awal', sta_akhir:'STA Akhir',
+  volume:'Volume', satuan:'Satuan', biaya:'Biaya', link_dokumentasi:'Link Dokumentasi',
+  foto_awal_path:'Foto Awal', foto_akhir_path:'Foto Akhir', kejadian_bencana_id:'Kejadian Bencana',
+  rekomendasi:'Rekomendasi', pagu:'Pagu', realisasi:'Realisasi',
+};
+function labelFieldAudit(k){ return AUDIT_FIELD_LABEL[k] || k.replaceAll('_',' ').replace(/\b\w/g, c=>c.toUpperCase()); }
+function formatNilaiAudit(k, v){
+  if(v===null || v===undefined || v==='') return '—';
+  if(['pagu','realisasi','biaya'].includes(k)) return fmtRp(v);
+  if(k.startsWith('tanggal_')) return fmtDate(v);
+  if((k==='kondisi'||k==='kondisi_hasil') && KONDISI_LABEL[v]) return KONDISI_LABEL[v];
+  if(Array.isArray(v)) return v.length? v.join(', ') : '—';
+  if(typeof v === 'string' && v.includes('_')) return v.replaceAll('_',' ');
+  return String(v);
+}
+// daftarPerubahan(): daftar LENGKAP field yang berubah (dipakai modal detail).
+function daftarPerubahan(lama, baru){
   const keys = new Set([...Object.keys(lama||{}), ...Object.keys(baru||{})]);
-  const skip = new Set(['id','created_at','updated_at']);
+  const skip = new Set(['id','created_at','updated_at','created_by']);
   const perubahan = [];
   keys.forEach(k=>{
     if(skip.has(k)) return;
     const a = lama?.[k], b = baru?.[k];
-    if(JSON.stringify(a) !== JSON.stringify(b)) perubahan.push(`${k}: ${a??'—'} → ${b??'—'}`);
+    if(JSON.stringify(a) !== JSON.stringify(b)) perubahan.push({ field:k, label:labelFieldAudit(k), dari:formatNilaiAudit(k,a), ke:formatNilaiAudit(k,b) });
   });
-  return perubahan.length? perubahan.slice(0,4).join(' · ') + (perubahan.length>4?' …':'') : 'Tidak ada perubahan nilai.';
+  return perubahan;
+}
+// ringkasPerubahan(): versi singkat untuk kolom tabel (dipotong beberapa item pertama).
+function ringkasPerubahan(lama, baru){
+  if(!lama) return 'Data baru ditambahkan.';
+  if(!baru) return 'Data dihapus.';
+  const perubahan = daftarPerubahan(lama, baru);
+  if(!perubahan.length) return 'Tidak ada perubahan nilai.';
+  return perubahan.slice(0,3).map(p=>`${p.label}: ${p.dari} → ${p.ke}`).join(' · ') + (perubahan.length>3? ` … (+${perubahan.length-3} lainnya)` : '');
+}
+// openAuditDetailModal(): tampilan ringkas "field apa berubah, dari → ke" secara
+// LENGKAP (tidak dipotong), menggantikan JSON mentah data_lama/data_baru.
+function openAuditDetailModal(log){
+  const judul = `${AUDIT_TABEL_LABEL[log.tabel]||log.tabel} · ${AUDIT_AKSI_LABEL[log.aksi]||log.aksi}`;
+  const subjudul = `${new Date(log.created_at).toLocaleString('id-ID')} · oleh ${log.actor_nama||'Sistem'}`;
+  let isi;
+  if(!log.data_lama){
+    isi = `<p class="text-[13.5px] text-ink-600">Data baru ditambahkan dengan seluruh isian sebagaimana tercatat saat ini.</p>`;
+  } else if(!log.data_baru){
+    isi = `<p class="text-[13.5px] text-ink-600">Seluruh data ini dihapus dari sistem.</p>`;
+  } else {
+    const perubahan = daftarPerubahan(log.data_lama, log.data_baru);
+    isi = perubahan.length
+      ? `<div class="max-h-[55vh] overflow-y-auto -mx-1 px-1"><table><thead><tr><th>Field</th><th>Nilai Lama</th><th>Nilai Baru</th></tr></thead><tbody>
+          ${perubahan.map(p=>`<tr><td class="font-medium text-[12.5px] whitespace-nowrap">${p.label}</td><td class="text-[12.5px] text-ink-500">${p.dari}</td><td class="text-[12.5px]">${p.ke}</td></tr>`).join('')}
+        </tbody></table></div>`
+      : `<p class="text-[13.5px] text-ink-500">Tidak ada perubahan nilai (mis. hanya menyimpan ulang data yang sama).</p>`;
+  }
+  const overlay = openModal(`
+    <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
+    <h3 class="font-display font-extrabold text-lg mb-1">Detail Perubahan</h3>
+    <p class="text-[13px] text-ink-500 mb-4">${judul} · ${subjudul}</p>
+    ${isi}
+  `);
+  overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.closeModal());
 }
 function debounce(fn, wait=350){
   let t; return (...args)=>{ clearTimeout(t); t = setTimeout(()=>fn(...args), wait); };
@@ -3946,28 +4168,32 @@ async function viewLogAktivitas(){
       <button id="f-audit-reset" type="button" class="btn-ghost">Reset Filter</button>
     </div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th>Waktu</th><th>Tabel</th><th>Aksi</th><th>Oleh</th><th>Ringkasan Perubahan</th></tr></thead>
-      <tbody id="audit-tbody"><tr><td colspan="5" class="text-center text-ink-400 py-8">Memuat…</td></tr></tbody></table>
+      <table><thead><tr><th>Waktu</th><th>Tabel</th><th>Aksi</th><th>Oleh</th><th>Ringkasan Perubahan</th><th></th></tr></thead>
+      <tbody id="audit-tbody"><tr><td colspan="6" class="text-center text-ink-400 py-8">Memuat…</td></tr></tbody></table>
     </div>`;
 
   let currentLogs = [];
   async function loadAndRender(){
     const tbody = document.getElementById('audit-tbody');
-    tbody.innerHTML = `<tr><td colspan="5" class="text-center text-ink-400 py-8">Memuat…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-ink-400 py-8">Memuat…</td></tr>`;
     try{
       const logs = await api.auditLog({limit:300, tabel:filter.tabel||undefined, aksi:filter.aksi||undefined, actorNama:filter.actorNama||undefined, dari:filter.dari||undefined, sampai:filter.sampai||undefined});
       currentLogs = logs;
       const adaFilter = filter.tabel||filter.aksi||filter.actorNama||filter.dari||filter.sampai;
       document.getElementById('audit-subtitle').textContent = `${logs.length} entri ${adaFilter?'sesuai filter':'terbaru'}${logs.length>=300?' (dibatasi 300, persempit filter untuk hasil lebih spesifik)':''}`;
-      tbody.innerHTML = logs.length? logs.map(l=>`
+      tbody.innerHTML = logs.length? logs.map((l,i)=>`
         <tr>
           <td class="font-mono text-[12px] whitespace-nowrap">${new Date(l.created_at).toLocaleString('id-ID')}</td>
           <td>${AUDIT_TABEL_LABEL[l.tabel]||l.tabel}</td>
           <td><span class="badge ${l.aksi==='delete'?'badge-rusak_berat':l.aksi==='insert'?'badge-baik':'badge-sedang'}">${AUDIT_AKSI_LABEL[l.aksi]||l.aksi}</span></td>
           <td class="text-[12.5px]">${l.actor_nama||'Sistem'}</td>
           <td class="text-[12.5px] text-ink-600 max-w-[420px]">${ringkasPerubahan(l.data_lama, l.data_baru)}</td>
-        </tr>`).join('') : `<tr><td colspan="5" class="text-center text-ink-400 py-8">Tidak ada aktivitas yang cocok dengan filter.</td></tr>`;
-    }catch(err){ tbody.innerHTML = `<tr><td colspan="5" class="text-center text-[13px] text-[var(--bad)] py-8">${terjemahkanErrorDb(err)}</td></tr>`; }
+          <td><button type="button" data-detail="${i}" class="btn-ghost !py-1.5 !px-2.5 text-[12px]">Detail</button></td>
+        </tr>`).join('') : `<tr><td colspan="6" class="text-center text-ink-400 py-8">Tidak ada aktivitas yang cocok dengan filter.</td></tr>`;
+      tbody.querySelectorAll('[data-detail]').forEach(btn=>{
+        btn.addEventListener('click', ()=>openAuditDetailModal(logs[Number(btn.dataset.detail)]));
+      });
+    }catch(err){ tbody.innerHTML = `<tr><td colspan="6" class="text-center text-[13px] text-[var(--bad)] py-8">${terjemahkanErrorDb(err)}</td></tr>`; }
   }
 
   document.getElementById('audit-export').innerHTML = exportButtons();
