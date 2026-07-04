@@ -63,6 +63,8 @@
   th{text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-500); padding:10px 14px; border-bottom:2px solid var(--line); white-space:nowrap;}
   td{padding:12px 14px; border-bottom:1px solid var(--line); font-size:14px; vertical-align:middle;}
   tr.row-hover:hover{background:#F8FAFD; cursor:pointer;}
+  tr.row-lewat-tenggat{background:#FCEEEE;}
+  tr.row-lewat-tenggat:hover{background:#FBE4E4;}
   .modal-overlay{background:rgba(7,26,46,.55); backdrop-filter:blur(2px);}
   .skel{background:linear-gradient(90deg,#EEF1F6 25%,#E3E8F0 37%,#EEF1F6 63%); background-size:400% 100%; animation:skel 1.4s infinite; border-radius:8px;}
   @keyframes skel{0%{background-position:100% 50%}100%{background-position:0 50%}}
@@ -168,6 +170,48 @@ function isPenugas(){ return state.profile && ['admin','kepala_bidang'].includes
 function fmtNum(n, d=0){ if(n===null||n===undefined) return '—'; return Number(n).toLocaleString('id-ID',{maximumFractionDigits:d}); }
 function fmtRp(n){ if(n===null||n===undefined) return '—'; return 'Rp ' + Number(n).toLocaleString('id-ID',{maximumFractionDigits:0}); }
 function fmtDate(d){ if(!d) return '—'; return new Date(d).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}); }
+
+// --- Pengembangan #4: highlight baris kadaluarsa/mendekati tenggat --------
+// tgl: string tanggal (yyyy-mm-dd). selesaiValues: daftar nilai status yang dianggap "sudah selesai"
+// (tidak perlu di-highlight lagi walau tanggalnya sudah lewat).
+function isLewatTenggat(tgl, status, selesaiValues=['selesai']){
+  if(!tgl) return false;
+  if(status && selesaiValues.includes(status)) return false;
+  const today = new Date().toISOString().slice(0,10);
+  return tgl < today;
+}
+
+// --- Pengembangan #5: terjemahkan pesan error database mentah ke Bahasa Indonesia
+// yang lebih ramah, tanpa mengubah constraint apa pun di database.
+function terjemahkanErrorDb(err){
+  const raw = (err && err.message) || String(err || 'Terjadi kesalahan yang tidak diketahui.');
+  const m = raw.toLowerCase();
+  if(!navigator.onLine || m.includes('failed to fetch') || m.includes('networkerror') || m.includes('load failed')){
+    return 'Tidak ada koneksi internet. Periksa koneksi Anda dan coba lagi.';
+  }
+  if(m.includes('duplicate key value violates unique constraint')){
+    if(m.includes('kode_ruas')) return 'Kode ruas ini sudah dipakai oleh ruas jalan lain. Gunakan kode yang berbeda.';
+    return 'Data ini sudah ada sebelumnya (tidak boleh duplikat). Periksa kembali isian Anda.';
+  }
+  if(m.includes('violates check constraint')){
+    if(m.includes('tanggal') || m.includes('tgl')) return 'Tanggal selesai tidak boleh lebih awal dari tanggal mulai.';
+    return 'Data yang diisi tidak memenuhi aturan yang berlaku. Periksa kembali isian Anda.';
+  }
+  if(m.includes('violates foreign key constraint')){
+    if(m.includes('delete') || m.includes('update or delete')) return 'Data ini tidak bisa dihapus karena masih dipakai oleh data lain yang terkait.';
+    return 'Data terkait (mis. ruas jalan/kabupaten) tidak ditemukan. Periksa kembali pilihan Anda.';
+  }
+  if(m.includes('violates not-null constraint')){
+    return 'Ada isian wajib yang belum diisi. Periksa kembali form Anda.';
+  }
+  if(m.includes('row-level security') || m.includes('permission denied') || m.includes('rls')){
+    return 'Anda tidak memiliki izin untuk melakukan aksi ini.';
+  }
+  if(m.includes('jwt') || m.includes('invalid token') || m.includes('session')){
+    return 'Sesi login Anda telah berakhir. Silakan masuk kembali.';
+  }
+  return raw;
+}
 function badge(kondisi){ if(!kondisi) return `<span class="badge badge-na">Belum disurvei</span>`; return `<span class="badge badge-${kondisi}"><svg width="6" height="6"><circle cx="3" cy="3" r="3" fill="currentColor"/></svg>${KONDISI_LABEL[kondisi]}</span>`; }
 function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstElementChild; }
 
@@ -1566,7 +1610,7 @@ function emptyStateNotice(){
   </div>`;
 }
 function errorPanel(err){
-  return `<div class="card p-6 border-[var(--bad)]"><div class="font-semibold text-[var(--bad)] mb-1">Gagal memuat data</div><p class="text-[13px] text-ink-500 font-mono">${(err&&err.message)||err}</p></div>`;
+  return `<div class="card p-6 border-[var(--bad)]"><div class="font-semibold text-[var(--bad)] mb-1">Gagal memuat data</div><p class="text-[13px] text-ink-500">${terjemahkanErrorDb(err)}</p></div>`;
 }
 
 // --- 9. VIEW: PETA -----------------------------------------------------------
@@ -1936,7 +1980,7 @@ async function viewRuas(){
         tr.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
           const r = ruas.find(x=>x.id===tr.dataset.id);
           if(!(await confirmDelete(`Hapus ruas "${r.nama_ruas}" beserta seluruh data terkait (segmen, survei, penanganan)?`))) return;
-          try{ await api.deleteRuas(r.id); viewRuas(); }catch(err){ alert('Gagal menghapus: '+err.message); }
+          try{ await api.deleteRuas(r.id); viewRuas(); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
         });
       });
     }
@@ -2094,11 +2138,11 @@ async function viewRuasDetail(id){
       row.querySelector('[data-act="detail"]')?.addEventListener('click', ()=>openKegiatanDetailModal(kg));
       row.querySelector('[data-act="edit"]')?.addEventListener('click', async ()=>{
         try{ const full = await api.penangananById(kg.id); openKegiatanFormModal(ruasAll, ruas, {...kg, ...full}, ()=>viewRuasDetail(id)); }
-        catch(err){ alert('Gagal memuat data kegiatan: '+err.message); }
+        catch(err){ alert('Gagal memuat data kegiatan: '+terjemahkanErrorDb(err)); }
       });
       row.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
         if(!(await confirmDelete('Hapus kegiatan penanganan ini beserta kelengkapan dokumennya?'))) return;
-        try{ await api.deletePenanganan(kg.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+err.message); }
+        try{ await api.deletePenanganan(kg.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
       });
     });
     // Survei kondisi actions
@@ -2107,7 +2151,7 @@ async function viewRuasDetail(id){
       row.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openSurveiFormModal(ruas, segmen, sv, ()=>viewRuasDetail(id)));
       row.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
         if(!(await confirmDelete('Hapus catatan survei kondisi ini?'))) return;
-        try{ await api.deleteSurvei(sv.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+err.message); }
+        try{ await api.deleteSurvei(sv.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
       });
     });
     // Data lalu lintas actions (panel ruas)
@@ -2116,7 +2160,7 @@ async function viewRuasDetail(id){
       row.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openLalulintasRuasFormModal(ruas, segmen, l, ()=>viewRuasDetail(id)));
       row.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
         if(!(await confirmDelete('Hapus data lalu lintas ini?'))) return;
-        try{ await api.deleteLalulintas(l.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+err.message); }
+        try{ await api.deleteLalulintas(l.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
       });
     });
     // Kejadian bencana actions (panel ruas)
@@ -2125,7 +2169,7 @@ async function viewRuasDetail(id){
       row.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openBencanaFormModal(ruasAll, b, ()=>viewRuasDetail(id), ruas.id));
       row.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
         if(!(await confirmDelete('Hapus catatan kejadian bencana ini?'))) return;
-        try{ await api.deleteBencana(b.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+err.message); }
+        try{ await api.deleteBencana(b.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
       });
     });
     // Anggaran actions
@@ -2134,7 +2178,7 @@ async function viewRuasDetail(id){
       row.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openAnggaranFormModal(ruas, ag, ()=>viewRuasDetail(id)));
       row.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
         if(!(await confirmDelete('Hapus data anggaran tahun ini?'))) return;
-        try{ await api.deleteAnggaran(ag.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+err.message); }
+        try{ await api.deleteAnggaran(ag.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
       });
     });
   }catch(err){ v.innerHTML = errorPanel(err); }
@@ -2144,7 +2188,13 @@ async function viewRuasDetail(id){
 function openModal(innerHtml){
   const overlay = el(`<div class="modal-overlay fixed inset-0 z-50 flex items-center justify-center p-4"></div>`);
   overlay.innerHTML = `<div class="card w-full max-w-lg max-h-[88vh] overflow-y-auto p-6 relative">${innerHtml}</div>`;
-  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.remove(); });
+  // Pengembangan #7: modal bisa memasang overlay._confirmBeforeClose = ()=>boolean
+  // untuk menahan penutupan modal (mis. form panjang yang ada isian belum disimpan).
+  overlay.closeModal = ()=>{
+    if(overlay._confirmBeforeClose && !overlay._confirmBeforeClose()) return;
+    overlay.remove();
+  };
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.closeModal(); });
   document.body.appendChild(overlay);
   return overlay;
 }
@@ -2228,7 +2278,7 @@ function openRuasFormModal(kabupaten, editData=null){
       overlay.remove();
       notifikasiToast('Data berhasil disimpan.', 'success');
       if(isEdit && state.selectedRuasId===editData.id){ viewRuasDetail(editData.id); } else { viewRuas(); }
-    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
+    }catch(err){ errBox.textContent = terjemahkanErrorDb(err); errBox.classList.remove('hidden'); }
   });
 }
 function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
@@ -2354,7 +2404,7 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
       if(onSaved) onSaved(); else viewRuasDetail(ruas.id);
     }catch(err){
       submitBtn.textContent = submitLabel;
-      errBox.textContent = err.message; errBox.classList.remove('hidden');
+      errBox.textContent = terjemahkanErrorDb(err); errBox.classList.remove('hidden');
     } finally {
       submitBtn.disabled = false;
     }
@@ -2452,7 +2502,38 @@ function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=nul
       <div id="kg-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
       <button type="submit" class="btn-primary w-full">${isEdit?'Simpan Perubahan':'Simpan Kegiatan Penanganan'}</button>
     </form>`);
-  overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+
+  // Pengembangan #7: peringatan "perubahan belum disimpan" saat form ditutup.
+  // Form ini cukup panjang, jadi tanda perubahan (dirty) dipantau begitu ada
+  // input/pilihan yang diubah oleh pengguna, dan modal minta konfirmasi
+  // sebelum ditutup lewat tombol ✕ atau klik di luar modal.
+  let kgDirty = false;
+  let kgSubmitted = false;
+  const kgForm = overlay.querySelector('#form-kegiatan');
+  kgForm.addEventListener('input', ()=>{ kgDirty = true; });
+  kgForm.addEventListener('change', ()=>{ kgDirty = true; });
+  overlay._confirmBeforeClose = ()=>{
+    if(kgSubmitted || !kgDirty) return true;
+    return confirm('Anda yakin ingin menutup? Perubahan belum disimpan.');
+  };
+  overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.closeModal());
+
+  // Pengembangan #6: validasi tanggal langsung saat diisi (bukan cuma saat submit).
+  const kgTglMulaiEl = overlay.querySelector('#kg-tgl-mulai');
+  const kgTglSelesaiEl = overlay.querySelector('#kg-tgl-selesai');
+  function validasiTanggalLive(){
+    const errBox = overlay.querySelector('#kg-err');
+    if(kgTglMulaiEl.value && kgTglSelesaiEl.value && kgTglSelesaiEl.value < kgTglMulaiEl.value){
+      kgTglSelesaiEl.style.borderColor = 'var(--bad)';
+      errBox.textContent = 'Tanggal Selesai tidak boleh lebih awal dari Tanggal Mulai.';
+      errBox.classList.remove('hidden');
+    } else {
+      kgTglSelesaiEl.style.borderColor = '';
+      errBox.classList.add('hidden');
+    }
+  }
+  kgTglMulaiEl.addEventListener('change', validasiTanggalLive);
+  kgTglSelesaiEl.addEventListener('change', validasiTanggalLive);
 
   let getSubKegiatan = ()=>overlay.querySelector('#kg-sub').value;
   async function loadSubKegiatan(jenis, selected){
@@ -2503,9 +2584,17 @@ function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=nul
     const submitBtn = overlay.querySelector('button[type="submit"]');
     const subKegiatan = getSubKegiatan();
     const tglMulai = overlay.querySelector('#kg-tgl-mulai').value;
+    const tglSelesai = overlay.querySelector('#kg-tgl-selesai').value;
     const ruasId = overlay.querySelector('#kg-ruas').value;
     const fileAwal = overlay.querySelector('#kg-foto-awal').files?.[0] || null;
     const fileAkhir = overlay.querySelector('#kg-foto-akhir').files?.[0] || null;
+    // Pengembangan #6: validasi tanggal langsung di form, sebelum submit ke database.
+    if(tglMulai && tglSelesai && tglSelesai < tglMulai){
+      errBox.textContent = 'Tanggal Selesai tidak boleh lebih awal dari Tanggal Mulai.';
+      errBox.classList.remove('hidden');
+      overlay.querySelector('#kg-tgl-selesai').focus();
+      return;
+    }
     submitBtn.disabled = true; const submitLabel = submitBtn.textContent;
     try{
       let fotoAwalPath = editData?.foto_awal_path || null;
@@ -2550,23 +2639,25 @@ function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=nul
       if(isEdit){ payload.segmen_id = editData?.segmen_id ?? null; }
       if(isEdit){ await api.updatePenanganan(editData.id, payload, editData?.updated_at || null); }
       else{ payload.created_by = state.user.id; await api.insertPenanganan(payload); }
+      kgSubmitted = true;
       overlay.remove();
       notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved(); else viewKegiatan();
     }catch(err){
       submitBtn.textContent = submitLabel; submitBtn.disabled = false;
       if(err.code === 'STALE_UPDATE'){
-        errBox.innerHTML = `${err.message} <button type="button" id="kg-err-reload" class="underline font-semibold ml-1">Muat ulang</button>`;
+        errBox.innerHTML = `${terjemahkanErrorDb(err)} <button type="button" id="kg-err-reload" class="underline font-semibold ml-1">Muat ulang</button>`;
         errBox.classList.remove('hidden');
         errBox.querySelector('#kg-err-reload')?.addEventListener('click', async ()=>{
           try{
             const fresh = await api.penangananById(editData.id);
+            kgSubmitted = true;
             overlay.remove();
             openKegiatanFormModal(ruasList, defaultRuas, {...editData, ...fresh}, onSaved);
           }catch(e){ /* biarkan modal lama terbuka kalau gagal memuat ulang */ }
         });
       } else {
-        errBox.textContent = err.message; errBox.classList.remove('hidden');
+        errBox.textContent = terjemahkanErrorDb(err); errBox.classList.remove('hidden');
       }
     }
   });
@@ -2633,11 +2724,11 @@ function openKegiatanDetailModal(kg){
             rowData.status = newStatus;
             e.currentTarget.className = `w-5 h-5 rounded border ${newStatus==='sudah'?'bg-[var(--good)] border-[var(--good)] text-white':'border-line'} flex items-center justify-center shrink-0`;
             e.currentTarget.innerHTML = newStatus==='sudah'?icon('check','w-3.5 h-3.5'):'';
-          }catch(err){ alert('Gagal memperbarui status dokumen: '+err.message); }
+          }catch(err){ alert('Gagal memperbarui status dokumen: '+terjemahkanErrorDb(err)); }
         });
         row.querySelector('[data-link]').addEventListener('change', async (e)=>{
           try{ await api.updateDokumen(dokId, {link_dokumen: e.target.value || null, tanggal_update:new Date().toISOString(), uploaded_by:state.user.id}); }
-          catch(err){ alert('Gagal menyimpan link: '+err.message); }
+          catch(err){ alert('Gagal menyimpan link: '+terjemahkanErrorDb(err)); }
         });
       });
     }
@@ -2681,7 +2772,7 @@ function openAnggaranFormModal(ruas, editData=null, onSaved=null){
       overlay.remove();
       notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved(); else viewRuasDetail(ruas.id);
-    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
+    }catch(err){ errBox.textContent = terjemahkanErrorDb(err); errBox.classList.remove('hidden'); }
   });
 }
 
@@ -2763,7 +2854,7 @@ function openBencanaFormModal(ruasList, editData=null, onSaved=null, presetRuasI
       overlay.remove();
       notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved(); else viewBencana();
-    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
+    }catch(err){ errBox.textContent = terjemahkanErrorDb(err); errBox.classList.remove('hidden'); }
   });
 }
 
@@ -2821,19 +2912,22 @@ async function viewKegiatan(){
       });
       document.getElementById('kegiatan-count').textContent = rows.length;
       const tbody = document.getElementById('kegiatan-tbody');
-      tbody.innerHTML = rows.map(k=>`
-        <tr class="row-hover" data-id="${k.id}">
+      tbody.innerHTML = rows.map(k=>{
+        const lewat = isLewatTenggat(k.tanggal_selesai, k.status_pekerjaan);
+        return `
+        <tr class="row-hover ${lewat?'row-lewat-tenggat':''}" data-id="${k.id}">
           <td>${fotoThumbHtml(k.foto_awal_path || k.foto_akhir_path)}</td>
           <td><span class="font-mono text-[12px] text-navy-700 font-semibold">${k.kode_ruas}</span><div class="text-[12.5px]">${k.nama_ruas}</div></td>
           <td class="capitalize">${(k.jenis_penanganan||'—').replaceAll('_',' ')}${k.kejadian_bencana_id?` <span class="text-[var(--bad)]" title="Menangani kejadian bencana: ${(k.bencana_jenis_kejadian||'—').replaceAll('_',' ')} · ${fmtDate(k.bencana_tanggal_kejadian)}">⚠</span>`:''}</td>
           <td class="text-ink-500 text-[12.5px] max-w-[220px] truncate">${k.sub_kegiatan||'—'}</td>
           <td class="font-mono text-[12.5px]">${fmtDate(k.tanggal_penanganan)}</td>
-          <td class="font-mono text-[12.5px]">${k.tanggal_selesai? fmtDate(k.tanggal_selesai) : '—'}</td>
+          <td class="font-mono text-[12.5px]">${k.tanggal_selesai? fmtDate(k.tanggal_selesai) : '—'}${lewat?` <span class="text-[var(--bad)]" title="Sudah lewat target penyelesaian">⚠</span>`:''}</td>
           <td class="font-mono text-[12.5px]">${fmtRp(k.biaya)}</td>
           <td><span class="badge ${k.status_pekerjaan==='selesai'?'badge-baik':k.status_pekerjaan==='terhenti'?'badge-rusak_berat':'badge-sedang'} capitalize">${(k.status_pekerjaan||'—').replaceAll('_',' ')}</span></td>
           <td class="max-w-[160px]">${k.link_dokumentasi?`<a href="${k.link_dokumentasi}" target="_blank" rel="noopener" data-stop-row class="text-navy-700 underline text-[12.5px] truncate block">Buka Link</a>`:'<span class="text-ink-400 text-[12.5px]">—</span>'}</td>
           ${isEditor()?`<td>${actionBtns({onDetail:true, onEdit:true, onDelete:isAdmin()})}</td>`:''}
-        </tr>`).join('');
+        </tr>`;
+      }).join('');
       document.getElementById('kegiatan-empty').classList.toggle('hidden', rows.length>0);
       hydrateFotoThumbs(tbody);
       tbody.querySelectorAll('tr').forEach(tr=>{
@@ -2843,11 +2937,11 @@ async function viewKegiatan(){
         tr.querySelector('[data-act="detail"]')?.addEventListener('click', ()=>openKegiatanDetailModal(kg));
         tr.querySelector('[data-act="edit"]')?.addEventListener('click', async ()=>{
           try{ const full = await api.penangananById(kg.id); openKegiatanFormModal(ruas, {id:kg.ruas_id}, {...kg, ...full}, ()=>viewKegiatan()); }
-          catch(err){ alert('Gagal memuat data kegiatan: '+err.message); }
+          catch(err){ alert('Gagal memuat data kegiatan: '+terjemahkanErrorDb(err)); }
         });
         tr.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
           if(!(await confirmDelete('Hapus kegiatan penanganan ini beserta kelengkapan dokumennya?'))) return;
-          try{ await api.deletePenanganan(kg.id); viewKegiatan(); }catch(err){ alert('Gagal menghapus: '+err.message); }
+          try{ await api.deletePenanganan(kg.id); viewKegiatan(); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
         });
       });
     }
@@ -2957,7 +3051,7 @@ async function renderDokDetail(kegiatanId, kegiatan){
             try{
               await api.updateDokumen(dokId, {status:'sudah', link_dokumen:link, tanggal_update:new Date().toISOString(), uploaded_by:state.user.id});
               renderDokDetail(kegiatanId, kegiatan);
-            }catch(err){ alert('Gagal menyimpan: '+err.message); }
+            }catch(err){ alert('Gagal menyimpan: '+terjemahkanErrorDb(err)); }
           });
         });
       });
@@ -2965,7 +3059,7 @@ async function renderDokDetail(kegiatanId, kegiatan){
         btn.addEventListener('click', async ()=>{
           const dokId = btn.closest('[data-dokid]').dataset.dokid;
           try{ await api.updateDokumen(dokId, {status:'belum'}); renderDokDetail(kegiatanId, kegiatan); }
-          catch(err){ alert('Gagal memperbarui: '+err.message); }
+          catch(err){ alert('Gagal memperbarui: '+terjemahkanErrorDb(err)); }
         });
       });
     }
@@ -3090,12 +3184,13 @@ async function viewPenugasan(){
       const tbody = document.getElementById('penugasan-tbody');
       tbody.innerHTML = rows.map(p=>{
         const canUpdateStatus = isPenugas() || (p.petugas_ids||[]).includes(state.user.id);
+        const lewat = isLewatTenggat(p.target_tanggal, p.status);
         return `
-        <tr data-id="${p.id}">
+        <tr data-id="${p.id}" class="${lewat?'row-lewat-tenggat':''}">
           <td class="font-medium">${p.kode_ruas? `<span class="font-mono text-[12px] text-navy-700 font-semibold">${p.kode_ruas}</span> · `:''}${p.nama_ruas}</td>
           <td class="text-ink-500">${p.kabupaten||'—'}</td>
           <td>${p.nama_petugas}</td>
-          <td class="font-mono text-[12.5px]">${p.target_tanggal? fmtDate(p.target_tanggal) : '—'}</td>
+          <td class="font-mono text-[12.5px]">${p.target_tanggal? fmtDate(p.target_tanggal) : '—'}${lewat?` <span class="text-[var(--bad)]" title="Sudah lewat tenggat">⚠</span>`:''}</td>
           <td>${canUpdateStatus? `
             <select data-status-id="${p.id}" class="pn-status-select max-w-[170px]" style="border-color:${PENUGASAN_STATUS_COLOR[p.status]}">
               ${Object.keys(PENUGASAN_STATUS_LABEL).map(s=>`<option value="${s}" ${p.status===s?'selected':''}>${PENUGASAN_STATUS_LABEL[s]}</option>`).join('')}
@@ -3109,7 +3204,7 @@ async function viewPenugasan(){
 
       tbody.querySelectorAll('.pn-status-select').forEach(sel=>sel.addEventListener('change', async ()=>{
         try{ await api.updatePenugasan(sel.dataset.statusId, {status: sel.value}); const item = penugasan.find(x=>x.id===sel.dataset.statusId); if(item) item.status = sel.value; sel.style.borderColor = PENUGASAN_STATUS_COLOR[sel.value]; }
-        catch(err){ alert('Gagal memperbarui status: '+err.message); }
+        catch(err){ alert('Gagal memperbarui status: '+terjemahkanErrorDb(err)); }
       }));
       tbody.querySelectorAll('[data-act="edit"]').forEach(btn=>btn.addEventListener('click', (e)=>{
         const id = e.target.closest('tr').dataset.id;
@@ -3118,7 +3213,7 @@ async function viewPenugasan(){
       tbody.querySelectorAll('[data-act="delete"]').forEach(btn=>btn.addEventListener('click', async (e)=>{
         const id = e.target.closest('tr').dataset.id;
         if(!(await confirmDelete('Hapus penugasan survei ini?'))) return;
-        try{ await api.deletePenugasan(id); viewPenugasan(); }catch(err){ alert('Gagal menghapus: '+err.message); }
+        try{ await api.deletePenugasan(id); viewPenugasan(); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
       }));
     }
     ['pn-search','pn-status'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
@@ -3184,7 +3279,7 @@ function openPenugasanFormModal(ruasList, stafList, editData=null, onSaved=null)
       overlay.remove();
       notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved();
-    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
+    }catch(err){ errBox.textContent = terjemahkanErrorDb(err); errBox.classList.remove('hidden'); }
   });
 }
 
@@ -3227,7 +3322,7 @@ async function viewBencana(){
         row.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openBencanaFormModal(ruas, b, ()=>viewBencana()));
         row.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
           if(!(await confirmDelete('Hapus catatan kejadian bencana ini?'))) return;
-          try{ await api.deleteBencana(b.id); viewBencana(); }catch(err){ alert('Gagal menghapus: '+err.message); }
+          try{ await api.deleteBencana(b.id); viewBencana(); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
         });
       });
     }
@@ -3316,7 +3411,7 @@ async function renderJembatanTab(){
         tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openJembatanFormModal(ruas, j, renderJembatanTab));
         tr.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
           if(!(await confirmDelete('Hapus data jembatan ini?'))) return;
-          try{ await api.deleteJembatan(j.id); renderJembatanTab(); }catch(err){ alert('Gagal menghapus: '+err.message); }
+          try{ await api.deleteJembatan(j.id); renderJembatanTab(); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
         });
       });
     }
@@ -3376,7 +3471,7 @@ function openJembatanFormModal(ruasList, editData=null, onSaved=null){
       overlay.remove();
       notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved();
-    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
+    }catch(err){ errBox.textContent = terjemahkanErrorDb(err); errBox.classList.remove('hidden'); }
   });
 }
 
@@ -3433,7 +3528,7 @@ async function renderDrainaseTab(){
         tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openDrainaseFormModal(ruas, d, renderDrainaseTab));
         tr.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
           if(!(await confirmDelete('Hapus data drainase ini?'))) return;
-          try{ await api.deleteDrainase(d.id); renderDrainaseTab(); }catch(err){ alert('Gagal menghapus: '+err.message); }
+          try{ await api.deleteDrainase(d.id); renderDrainaseTab(); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
         });
       });
     }
@@ -3509,7 +3604,7 @@ function openDrainaseFormModal(ruasList, editData=null, onSaved=null){
       overlay.remove();
       notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved();
-    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
+    }catch(err){ errBox.textContent = terjemahkanErrorDb(err); errBox.classList.remove('hidden'); }
   });
 }
 
@@ -3565,7 +3660,7 @@ async function renderPerlengkapanTab(){
         tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openPerlengkapanFormModal(ruas, p, renderPerlengkapanTab));
         tr.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
           if(!(await confirmDelete('Hapus data perlengkapan ini?'))) return;
-          try{ await api.deletePerlengkapan(p.id); renderPerlengkapanTab(); }catch(err){ alert('Gagal menghapus: '+err.message); }
+          try{ await api.deletePerlengkapan(p.id); renderPerlengkapanTab(); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
         });
       });
     }
@@ -3636,7 +3731,7 @@ function openPerlengkapanFormModal(ruasList, editData=null, onSaved=null){
       overlay.remove();
       notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved();
-    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
+    }catch(err){ errBox.textContent = terjemahkanErrorDb(err); errBox.classList.remove('hidden'); }
   });
 }
 
@@ -3693,7 +3788,7 @@ async function renderLalulintasTab(){
         tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openLalulintasFormModal(ruas, l, renderLalulintasTab));
         tr.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
           if(!(await confirmDelete('Hapus data lalu lintas ini?'))) return;
-          try{ await api.deleteLalulintas(l.id); renderLalulintasTab(); }catch(err){ alert('Gagal menghapus: '+err.message); }
+          try{ await api.deleteLalulintas(l.id); renderLalulintasTab(); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
         });
       });
     }
@@ -3760,7 +3855,7 @@ function openLalulintasFormModal(ruasList, editData=null, onSaved=null){
       overlay.remove();
       notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved();
-    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
+    }catch(err){ errBox.textContent = terjemahkanErrorDb(err); errBox.classList.remove('hidden'); }
   });
 }
 
@@ -3808,7 +3903,7 @@ function openLalulintasRuasFormModal(ruas, segmenList, editData=null, onSaved=nu
       overlay.remove();
       notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved();
-    }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
+    }catch(err){ errBox.textContent = terjemahkanErrorDb(err); errBox.classList.remove('hidden'); }
   });
 }
 
@@ -3872,7 +3967,7 @@ async function viewLogAktivitas(){
           <td class="text-[12.5px]">${l.actor_nama||'Sistem'}</td>
           <td class="text-[12.5px] text-ink-600 max-w-[420px]">${ringkasPerubahan(l.data_lama, l.data_baru)}</td>
         </tr>`).join('') : `<tr><td colspan="5" class="text-center text-ink-400 py-8">Tidak ada aktivitas yang cocok dengan filter.</td></tr>`;
-    }catch(err){ tbody.innerHTML = `<tr><td colspan="5" class="text-center text-[13px] text-[var(--bad)] py-8">${err.message}</td></tr>`; }
+    }catch(err){ tbody.innerHTML = `<tr><td colspan="5" class="text-center text-[13px] text-[var(--bad)] py-8">${terjemahkanErrorDb(err)}</td></tr>`; }
   }
 
   document.getElementById('audit-export').innerHTML = exportButtons();
@@ -3922,7 +4017,7 @@ async function viewAdmin(){
     </div>`;
     v.querySelectorAll('.role-select').forEach(sel=>sel.addEventListener('change', async ()=>{
       try{ await api.updateRole(sel.dataset.id, sel.value); }
-      catch(err){ alert('Gagal memperbarui peran: '+err.message); }
+      catch(err){ alert('Gagal memperbarui peran: '+terjemahkanErrorDb(err)); }
     }));
   }catch(err){ v.innerHTML = errorPanel(err); }
 }
