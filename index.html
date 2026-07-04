@@ -68,6 +68,24 @@
   .modal-overlay{background:rgba(7,26,46,.55); backdrop-filter:blur(2px);}
   .skel{background:linear-gradient(90deg,#EEF1F6 25%,#E3E8F0 37%,#EEF1F6 63%); background-size:400% 100%; animation:skel 1.4s infinite; border-radius:8px;}
   @keyframes skel{0%{background-position:100% 50%}100%{background-position:0 50%}}
+  /* --- Pengembangan #3: pemuatan bertema "jalan" — garis jalan bergaris putus-putus
+     yang berjalan + penanda oranye yang melintas, dipakai sebagai indikator loading
+     yang konsisten & khas SIJALAN, menggantikan teks "Memuat…" polos. ------------ */
+  .road-loader{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px;}
+  .road-loader .road{position:relative; height:14px; border-radius:7px; background:var(--navy-800); overflow:hidden; box-shadow:inset 0 1px 2px rgba(0,0,0,.25);}
+  .road-loader .road::before{content:''; position:absolute; top:50%; left:0; right:0; height:3px; margin-top:-1.5px;
+    background-image:repeating-linear-gradient(90deg,#fff 0 9px,transparent 9px 19px); opacity:.85;
+    animation:road-dash .55s linear infinite;}
+  .road-loader .road .marker{position:absolute; top:50%; width:9px; height:9px; margin-top:-4.5px; border-radius:50%;
+    background:var(--accent); box-shadow:0 0 7px 1px rgba(242,169,59,.75); animation:road-marker 1.15s cubic-bezier(.45,0,.2,1) infinite;}
+  .road-loader .label{font-size:13px; color:var(--ink-500); font-weight:600; letter-spacing:.1px;}
+  @keyframes road-dash{to{background-position:-38px 0;}}
+  @keyframes road-marker{0%{left:-12%; opacity:0;}8%{opacity:1;}92%{opacity:1;}100%{left:112%; opacity:0;}}
+  #boot-splash{position:fixed; inset:0; z-index:9999; display:flex; align-items:center; justify-content:center; background:var(--navy-950);}
+  #boot-splash .road-loader .label{color:#B9C6DB;}
+  #boot-splash .brand{color:#fff; font-size:20px; margin-bottom:2px; letter-spacing:.3px;}
+  #boot-splash .brand-sub{color:#7C8CA8; font-size:12px; margin-bottom:14px;}
+  @media(prefers-reduced-motion: reduce){ .road-loader .road::before, .road-loader .marker{animation:none;} }
   .roadruler{position:relative; height:56px; border-radius:8px; overflow:hidden; background:repeating-linear-gradient(90deg,#20344B,#20344B 2px,transparent 2px,transparent 4px), #2A3F58;}
   .roadruler .lane{position:absolute; top:50%; left:0; right:0; height:0; border-top:3px dashed rgba(255,255,255,.55); transform:translateY(-50%);}
   .roadruler .seg{position:absolute; top:0; bottom:0;}
@@ -78,7 +96,14 @@
 </head>
 <body>
 
-<div id="root"></div>
+<div id="root"><div id="boot-splash">
+  <div class="road-loader">
+    <div class="brand font-display font-extrabold">SIJALAN</div>
+    <div class="brand-sub">Sistem Informasi Jalan · Bina Marga PUPR NTT</div>
+    <div class="road" style="width:160px"><span class="marker"></span></div>
+    <div class="label">Memuat aplikasi…</div>
+  </div>
+</div></div>
 
 <script>
 /* =========================================================================
@@ -211,6 +236,33 @@ function terjemahkanErrorDb(err){
     return 'Sesi login Anda telah berakhir. Silakan masuk kembali.';
   }
   return raw;
+}
+// --- Pengembangan #3: indikator loading bertema jalan (khas SIJALAN), dipakai
+// menggantikan spinner/teks polos di berbagai tempat: peta, panel detail, dst.
+function roadLoader(label='Memuat data…', width=120){
+  return `<div class="road-loader py-8">
+    <div class="road" style="width:${width}px"><span class="marker"></span></div>
+    <div class="label">${label}</div>
+  </div>`;
+}
+// skeletonTable(): kerangka tabel yang menyerupai bentuk tabel aslinya (baris & kolom
+// dengan lebar bervariasi), dipakai sebagai loading state daftar data — lebih hidup
+// dibanding satu blok abu-abu polos, dan konsisten dipakai di semua menu daftar.
+function skeletonTable(jumlahKolom=6, jumlahBaris=7){
+  const polaLebar = ['82%','55%','40%','66%','48%','35%','58%','44%'];
+  const baris = Array.from({length:jumlahBaris}).map((_,i)=>`
+    <tr>${Array.from({length:jumlahKolom}).map((__,j)=>`<td><div class="skel" style="height:13px;width:${polaLebar[(i*jumlahKolom+j)%polaLebar.length]}"></div></td>`).join('')}</tr>`).join('');
+  return `<div class="card overflow-hidden">
+    <div class="p-4 border-b border-line flex items-center gap-2"><div class="skel" style="height:14px;width:160px"></div></div>
+    <table><tbody>${baris}</tbody></table>
+  </div>`;
+}
+// skeletonRows(): mirip skeletonTable() tapi tanpa bungkus <table>/<card> —
+// dipakai saat menyisipkan langsung ke <tbody> yang headernya sudah tampil.
+function skeletonRows(jumlahKolom=6, jumlahBaris=6){
+  const polaLebar = ['82%','55%','40%','66%','48%','35%','58%','44%'];
+  return Array.from({length:jumlahBaris}).map((_,i)=>`
+    <tr>${Array.from({length:jumlahKolom}).map((__,j)=>`<td><div class="skel" style="height:13px;width:${polaLebar[(i*jumlahKolom+j)%polaLebar.length]}"></div></td>`).join('')}</tr>`).join('');
 }
 function badge(kondisi){ if(!kondisi) return `<span class="badge badge-na">Belum disurvei</span>`; return `<span class="badge badge-${kondisi}"><svg width="6" height="6"><circle cx="3" cy="3" r="3" fill="currentColor"/></svg>${KONDISI_LABEL[kondisi]}</span>`; }
 function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstElementChild; }
@@ -1783,10 +1835,7 @@ async function viewPeta(){
     <div class="relative">
       <div id="map" style="height:560px;"></div>
       <div id="map-loading" class="absolute inset-0 z-[400] flex items-center justify-center bg-white/70 rounded-xl">
-        <div class="flex items-center gap-2.5 text-[13px] font-semibold text-ink-500">
-          <span class="w-4 h-4 rounded-full border-2 border-ink-300 border-t-navy-700 animate-spin"></span>
-          Memuat data peta…
-        </div>
+        ${roadLoader('Memuat data peta…', 100)}
       </div>
     </div>
   </div>
@@ -2051,7 +2100,7 @@ function emptyStateMap(){
 async function viewRuas(){
   const v = document.getElementById('view');
   if(state.selectedRuasId){ return viewRuasDetail(state.selectedRuasId); }
-  v.innerHTML = `<div class="skel h-10 w-full mb-4"></div><div class="skel h-96 w-full"></div>`;
+  v.innerHTML = `<div class="skel h-10 w-full mb-4"></div>${skeletonTable(9)}`;
   try{
     const [ruas, kabupaten, kondisi] = await Promise.all([api.ruasList(), api.kabupaten(), api.kondisiTerkini()]);
     state.ruasCache = ruas; state.kabupatenList = kabupaten;
@@ -3021,7 +3070,7 @@ function openBencanaFormModal(ruasList, editData=null, onSaved=null, presetRuasI
 // --- 11e. VIEW: KEGIATAN PENANGANAN (menu baru) ----------------------------
 async function viewKegiatan(){
   const v = document.getElementById('view');
-  v.innerHTML = `<div class="skel h-10 w-full mb-4"></div><div class="skel h-96 w-full"></div>`;
+  v.innerHTML = `<div class="skel h-10 w-full mb-4"></div>${skeletonTable(9)}`;
   try{
     const [kegiatan, ruas, kabupaten] = await Promise.all([api.kegiatanList(), api.ruasList(), api.kabupaten()]);
     state.ruasCache = ruas;
@@ -3148,7 +3197,7 @@ async function viewDokumen(){
             <div class="text-[12px] text-ink-500 capitalize">${(k.jenis_penanganan||'—').replaceAll('_',' ')}${k.sub_kegiatan? ' · '+k.sub_kegiatan:''}</div>
           </button>`).join('') : `<div class="p-6 text-center text-ink-400 text-[13px]">Belum ada kegiatan penanganan.</div>`}
       </div>
-      <div id="dok-detail"><div class="skel h-96 w-full"></div></div>
+      <div id="dok-detail">${roadLoader('Memuat detail dokumen…', 90)}</div>
     </div>`;
     v.querySelectorAll('[data-kid]').forEach(btn=>btn.addEventListener('click', ()=>{ state.selectedDokKegiatanId = btn.dataset.kid; viewDokumen(); }));
     if(state.selectedDokKegiatanId) renderDokDetail(state.selectedDokKegiatanId, kegiatan.find(k=>k.id===state.selectedDokKegiatanId));
@@ -3159,7 +3208,7 @@ async function viewDokumen(){
 async function renderDokDetail(kegiatanId, kegiatan){
   const box = document.getElementById('dok-detail');
   if(!box) return;
-  box.innerHTML = `<div class="skel h-72 w-full"></div>`;
+  box.innerHTML = roadLoader('Memuat detail dokumen…', 90);
   try{
     const rows = await api.dokumenMatrix(kegiatanId);
     const done = rows.filter(r=>r.status==='sudah').length;
@@ -3229,7 +3278,7 @@ async function renderDokDetail(kegiatanId, kegiatan){
 // --- 12. VIEW: ANGGARAN ---------------------------------------------------
 async function viewAnggaran(){
   const v = document.getElementById('view');
-  v.innerHTML = `<div class="skel h-72 w-full mb-5"></div><div class="skel h-96 w-full"></div>`;
+  v.innerHTML = `<div class="skel h-72 w-full mb-5"></div>${skeletonTable(5)}`;
   try{
     const [rekap, rekapKab, kabupaten] = await Promise.all([api.rekapAnggaran(), api.rekapAnggaranKabupaten(), api.kabupaten()]);
     const tahunOpt = [...new Set([...rekap.map(r=>r.tahun), ...rekapKab.map(r=>r.tahun)])].sort((a,b)=>b-a);
@@ -3310,7 +3359,7 @@ async function viewAnggaran(){
 // --- 12b. VIEW: PENUGASAN SURVEI --------------------------------------------
 async function viewPenugasan(){
   const v = document.getElementById('view');
-  v.innerHTML = `<div class="skel h-10 w-full mb-4"></div><div class="skel h-96 w-full"></div>`;
+  v.innerHTML = `<div class="skel h-10 w-full mb-4"></div>${skeletonTable(6)}`;
   try{
     const [penugasan, ruas, staf] = await Promise.all([api.penugasanList(), api.ruasList(), api.staffList()]);
     v.innerHTML = `
@@ -3505,7 +3554,7 @@ async function viewAset(){
     <div class="flex gap-1 mb-4 border-b border-line">
       ${ASET_TABS.map(t=>`<button data-aset-tab="${t.id}" class="px-4 py-2.5 text-[13px] font-semibold -mb-px border-b-2 ${state.asetTab===t.id?'text-navy-700 border-navy-700':'text-ink-400 border-transparent'}">${t.label}</button>`).join('')}
     </div>
-    <div id="aset-body"><div class="skel h-96 w-full"></div></div>`;
+    <div id="aset-body">${skeletonTable(8)}</div>`;
   v.querySelectorAll('[data-aset-tab]').forEach(btn=>btn.addEventListener('click', ()=>{ state.asetTab = btn.dataset.asetTab; viewAset(); }));
   if(state.asetTab==='jembatan') renderJembatanTab();
   else if(state.asetTab==='drainase') renderDrainaseTab();
@@ -4151,7 +4200,7 @@ function debounce(fn, wait=350){
 async function viewLogAktivitas(){
   const v = document.getElementById('view');
   if(!isAdmin()){ v.innerHTML = `<div class="card p-8 text-center text-ink-400">Halaman ini khusus administrator.</div>`; return; }
-  v.innerHTML = `<div class="skel h-10 w-full mb-4"></div><div class="skel h-96 w-full"></div>`;
+  v.innerHTML = `<div class="skel h-10 w-full mb-4"></div>${skeletonTable(6)}`;
   const filter = {tabel:'', aksi:'', actorNama:'', dari:'', sampai:''};
   v.innerHTML = `
     <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
@@ -4169,13 +4218,13 @@ async function viewLogAktivitas(){
     </div>
     <div class="card overflow-x-auto">
       <table><thead><tr><th>Waktu</th><th>Tabel</th><th>Aksi</th><th>Oleh</th><th>Ringkasan Perubahan</th><th></th></tr></thead>
-      <tbody id="audit-tbody"><tr><td colspan="6" class="text-center text-ink-400 py-8">Memuat…</td></tr></tbody></table>
+      <tbody id="audit-tbody">${skeletonRows(6)}</tbody></table>
     </div>`;
 
   let currentLogs = [];
   async function loadAndRender(){
     const tbody = document.getElementById('audit-tbody');
-    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-ink-400 py-8">Memuat…</td></tr>`;
+    tbody.innerHTML = skeletonRows(6);
     try{
       const logs = await api.auditLog({limit:300, tabel:filter.tabel||undefined, aksi:filter.aksi||undefined, actorNama:filter.actorNama||undefined, dari:filter.dari||undefined, sampai:filter.sampai||undefined});
       currentLogs = logs;
@@ -4224,7 +4273,7 @@ async function viewLogAktivitas(){
 async function viewAdmin(){
   const v = document.getElementById('view');
   if(!isAdmin()){ v.innerHTML = `<div class="card p-8 text-center text-ink-400">Halaman ini khusus administrator.</div>`; return; }
-  v.innerHTML = `<div class="skel h-96 w-full"></div>`;
+  v.innerHTML = skeletonTable(4);
   try{
     const profiles = await api.profiles();
     v.innerHTML = `
