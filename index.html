@@ -735,8 +735,31 @@ const api = {
   // --- penugasan survei ---
   async penugasanList(){ const {data,error} = await sb.from('v_penugasan_survei').select('*'); if(error) throw error; return data; },
   async staffList(){ const {data,error} = await sb.from('profiles').select('*').eq('role','petugas_lapangan').order('nama'); if(error) throw error; return data; },
-  async insertPenugasan(payload){ const {error} = await sb.from('penugasan_survei').insert(payload); if(error) throw error; },
-  async updatePenugasan(id, payload){ const {error} = await sb.from('penugasan_survei').update(payload).eq('id',id); if(error) throw error; },
+  // Penugasan bisa ditugaskan ke tim (1 orang atau lebih). petugasIds: array uuid anggota tim.
+  async insertPenugasan(payload, petugasIds){
+    const {data,error} = await sb.from('penugasan_survei').insert(payload).select('id').single();
+    if(error) throw error;
+    const rows = (petugasIds||[]).map(pid=>({penugasan_id: data.id, petugas_id: pid}));
+    if(rows.length){
+      const {error: err2} = await sb.from('penugasan_survei_staf').insert(rows);
+      if(err2) throw err2;
+    }
+  },
+  // petugasIds: kalau diisi (array), anggota tim akan disinkronkan ulang (dihapus semua lalu diisi ulang
+  // dengan set yang baru). Kalau tidak diisi (mis. hanya update status), anggota tim tidak disentuh.
+  async updatePenugasan(id, payload, petugasIds=null){
+    const {error} = await sb.from('penugasan_survei').update(payload).eq('id',id);
+    if(error) throw error;
+    if(petugasIds){
+      const {error: errDel} = await sb.from('penugasan_survei_staf').delete().eq('penugasan_id', id);
+      if(errDel) throw errDel;
+      const rows = petugasIds.map(pid=>({penugasan_id: id, petugas_id: pid}));
+      if(rows.length){
+        const {error: errIns} = await sb.from('penugasan_survei_staf').insert(rows);
+        if(errIns) throw errIns;
+      }
+    }
+  },
   async deletePenugasan(id){ const {error} = await sb.from('penugasan_survei').delete().eq('id',id); if(error) throw error; },
 
   // --- kegiatan penanganan (terkoneksi langsung ke ruas_id) ---
@@ -3020,12 +3043,12 @@ async function viewPenugasan(){
       const rows = penugasan.filter(p=>{
         if(q && !((p.nama_ruas||'').toLowerCase().includes(q) || (p.kode_ruas||'').toLowerCase().includes(q) || (p.nama_petugas||'').toLowerCase().includes(q))) return false;
         if(st && p.status !== st) return false;
-        if(mine && p.petugas_id !== state.user.id) return false;
+        if(mine && !(p.petugas_ids||[]).includes(state.user.id)) return false;
         return true;
       });
       const tbody = document.getElementById('penugasan-tbody');
       tbody.innerHTML = rows.map(p=>{
-        const canUpdateStatus = isPenugas() || p.petugas_id === state.user.id;
+        const canUpdateStatus = isPenugas() || (p.petugas_ids||[]).includes(state.user.id);
         return `
         <tr data-id="${p.id}">
           <td class="font-medium">${p.kode_ruas? `<span class="font-mono text-[12px] text-navy-700 font-semibold">${p.kode_ruas}</span> · `:''}${p.nama_ruas}</td>
@@ -3079,11 +3102,13 @@ function openPenugasanFormModal(ruasList, stafList, editData=null, onSaved=null)
         </select>
       </div>
       <div>
-        <label class="text-[12.5px] font-semibold text-ink-600">Staf Petugas *</label>
-        <select id="pn-petugas" required>
-          <option value="">— Pilih staf —</option>
-          ${stafList.map(s=>`<option value="${s.id}" ${editData?.petugas_id===s.id?'selected':''}>${s.nama}</option>`).join('')}
-        </select>
+        <label class="text-[12.5px] font-semibold text-ink-600">Staf Petugas * <span class="font-normal text-ink-400">(bisa pilih lebih dari satu — untuk tim survei)</span></label>
+        <div id="pn-petugas-list" class="max-h-40 overflow-y-auto border border-[#E4E8F0] rounded-lg p-2 space-y-1">
+          ${stafList.map(s=>`<label class="flex items-center gap-2 text-[13px] py-0.5">
+            <input type="checkbox" value="${s.id}" class="pn-petugas-cb !w-auto" ${(editData?.petugas_ids||[]).includes(s.id)?'checked':''}>
+            ${s.nama}
+          </label>`).join('')}
+        </div>
         ${stafList.length===0?`<p class="text-[11.5px] text-ink-400 mt-1">Belum ada staf berperan "Petugas Lapangan". Atur peran pengguna di menu Pengguna terlebih dahulu.</p>`:''}
       </div>
       <div class="grid grid-cols-2 gap-3">
@@ -3098,17 +3123,23 @@ function openPenugasanFormModal(ruasList, stafList, editData=null, onSaved=null)
   overlay.querySelector('#form-penugasan').addEventListener('submit', async (e)=>{
     e.preventDefault();
     const errBox = overlay.querySelector('#pn-err');
+    errBox.classList.add('hidden');
+    const petugasIds = Array.from(overlay.querySelectorAll('.pn-petugas-cb:checked')).map(cb=>cb.value);
+    if(!petugasIds.length){
+      errBox.textContent = 'Pilih minimal satu staf petugas.';
+      errBox.classList.remove('hidden');
+      return;
+    }
     const payload = {
       ruas_id: editData?.ruas_id || overlay.querySelector('#pn-ruas').value,
-      petugas_id: overlay.querySelector('#pn-petugas').value,
       target_tanggal: overlay.querySelector('#pn-target').value || null,
       status: overlay.querySelector('#pn-status-input').value,
       catatan: overlay.querySelector('#pn-catatan').value || null,
     };
     if(!isEdit) payload.ditugaskan_oleh = state.user.id;
     try{
-      if(isEdit){ await api.updatePenugasan(editData.id, payload); }
-      else{ await api.insertPenugasan(payload); }
+      if(isEdit){ await api.updatePenugasan(editData.id, payload, petugasIds); }
+      else{ await api.insertPenugasan(payload, petugasIds); }
       overlay.remove();
       if(onSaved) onSaved();
     }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
