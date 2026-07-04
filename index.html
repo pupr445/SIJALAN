@@ -65,6 +65,18 @@
   tr.row-hover:hover{background:#F8FAFD; cursor:pointer;}
   tr.row-lewat-tenggat{background:#FCEEEE;}
   tr.row-lewat-tenggat:hover{background:#FBE4E4;}
+  /* --- Usulan #9: highlight baris kegiatan penanganan yang dokumennya kurang --- */
+  tr.row-dok-kurang{background:#FCF6E9;}
+  tr.row-dok-kurang:hover{background:#FBEDD0;}
+  /* --- Usulan #7: sortir kolom tabel dengan klik header --- */
+  th.th-sortable{cursor:pointer; user-select:none;}
+  th.th-sortable:hover{color:var(--navy-700);}
+  th.th-sortable::after{content:'⇅'; margin-left:5px; opacity:.35; font-size:10px; position:relative; top:-1px;}
+  th.th-sortable.sort-asc::after{content:'↑'; opacity:1;}
+  th.th-sortable.sort-desc::after{content:'↓'; opacity:1;}
+  /* --- Usulan #10: tombol "Muat Lebih Banyak" untuk tabel besar --- */
+  .btn-loadmore{border:1px dashed var(--line); color:var(--ink-600); border-radius:10px; padding:9px 20px; font-weight:600; font-size:12.5px; transition:.15s; background:#fff;}
+  .btn-loadmore:hover{border-color:var(--navy-600); color:var(--navy-700); border-style:solid;}
   .modal-overlay{background:rgba(7,26,46,.55); backdrop-filter:blur(2px);}
   .skel{background:linear-gradient(90deg,#EEF1F6 25%,#E3E8F0 37%,#EEF1F6 63%); background-size:400% 100%; animation:skel 1.4s infinite; border-radius:8px;}
   @keyframes skel{0%{background-position:100% 50%}100%{background-position:0 50%}}
@@ -2261,10 +2273,15 @@ async function viewRuas(){
       <div id="ruas-kab-export-btns"></div>
     </div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th>Kode</th><th>Nama Ruas</th><th>Kab/Kota</th><th>Status</th><th>Fungsi</th><th>Panjang</th><th>Lebar</th><th>Koordinat</th><th>Kondisi</th>${isEditor()?'<th>Aksi</th>':''}</tr></thead>
+      <table><thead><tr>
+        <th data-sort-key="kode_ruas">Kode</th><th data-sort-key="nama_ruas">Nama Ruas</th><th data-sort-key="kabupaten">Kab/Kota</th>
+        <th data-sort-key="status_jalan">Status</th><th data-sort-key="fungsi_jalan">Fungsi</th><th data-sort-key="panjang_km">Panjang</th>
+        <th data-sort-key="lebar_jalan_m">Lebar</th><th>Koordinat</th><th data-sort-key="kondisi">Kondisi</th>${isEditor()?'<th>Aksi</th>':''}
+      </tr></thead>
       <tbody id="ruas-tbody"></tbody></table>
     </div>
-    <div id="ruas-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada ruas yang cocok dengan filter.</div>`;
+    <div id="ruas-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada ruas yang cocok dengan filter.</div>
+    <div id="ruas-loadmore" class="text-center mt-4"></div>`;
 
     const kabExportBox = document.getElementById('ruas-kab-export');
     document.getElementById('ruas-kab-export-btns').innerHTML = exportButtons();
@@ -2278,13 +2295,16 @@ async function viewRuas(){
       if(kab) document.getElementById('ruas-kab-export-nama').textContent = kab.nama;
     }
 
+    // Usulan #7 & #10: state sortir kolom dan paginasi "muat lebih banyak" untuk tabel ini.
+    const sortState = {key:null, dir:'asc'};
+    const pageState = {shown:50, step:50};
     function renderRows(){
       const q = document.getElementById('f-search').value.toLowerCase();
       const kab = document.getElementById('f-kabupaten').value;
       const st = document.getElementById('f-status').value;
       const kd = document.getElementById('f-kondisi').value;
       const fg = document.getElementById('f-fungsi').value;
-      const rows = ruas.filter(r=>{
+      let rows = ruas.filter(r=>{
         if(q && !(r.kode_ruas?.toLowerCase().includes(q) || r.nama_ruas?.toLowerCase().includes(q))) return false;
         if(kab && r.kabupaten_id !== kab) return false;
         if(st && r.status_jalan !== st) return false;
@@ -2292,8 +2312,16 @@ async function viewRuas(){
         if(kd && worstByRuas[r.id] !== kd) return false;
         return true;
       });
+      rows = applySort(rows, sortState, {
+        kode_ruas: r=>r.kode_ruas, nama_ruas: r=>r.nama_ruas, kabupaten: r=>r.kabupaten?.nama||'',
+        status_jalan: r=>r.status_jalan||'', fungsi_jalan: r=>r.fungsi_jalan||'',
+        panjang_km: r=>r.panjang_km!=null?Number(r.panjang_km):null, lebar_jalan_m: r=>r.lebar_jalan_m!=null?Number(r.lebar_jalan_m):null,
+        kondisi: r=>worstByRuas[r.id]!=null? KONDISI_ORDER.indexOf(worstByRuas[r.id]) : 999,
+      });
+      const totalRows = rows.length;
+      const shownRows = rows.slice(0, pageState.shown);
       const tbody = document.getElementById('ruas-tbody');
-      tbody.innerHTML = rows.map(r=>`
+      tbody.innerHTML = shownRows.map(r=>`
         <tr class="row-hover" data-id="${r.id}">
           <td class="font-mono text-[12.5px] text-navy-700 font-semibold"><div class="flex items-center gap-1.5">${r.kode_ruas}${copyBtn(r.kode_ruas,'Salin kode ruas')}</div></td>
           <td class="font-medium">${r.nama_ruas}</td>
@@ -2312,7 +2340,8 @@ async function viewRuas(){
           <td>${badge(worstByRuas[r.id])}</td>
           ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
         </tr>`).join('');
-      document.getElementById('ruas-empty').classList.toggle('hidden', rows.length>0);
+      document.getElementById('ruas-empty').classList.toggle('hidden', totalRows>0);
+      renderLoadMoreBtn(document.getElementById('ruas-loadmore'), totalRows, pageState, renderRows);
       tbody.querySelectorAll('tr').forEach(tr=>{
         tr.addEventListener('click', ()=>{ state.selectedRuasId = tr.dataset.id; renderShell(); });
         tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>{
@@ -2325,14 +2354,18 @@ async function viewRuas(){
         });
       });
     }
-    document.getElementById('f-search').addEventListener('input', debounce(renderRows, 300));
-    ['f-kabupaten','f-status','f-fungsi','f-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    function renderRowsResetPage(){ pageState.shown = pageState.step; renderRows(); }
+    document.getElementById('f-search').addEventListener('input', debounce(renderRowsResetPage, 300));
+    ['f-kabupaten','f-status','f-fungsi','f-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRowsResetPage));
     document.getElementById('f-kabupaten').addEventListener('input', toggleKabExportBox);
     document.getElementById('f-reset').addEventListener('click', ()=>{
       document.getElementById('f-search').value='';
       ['f-kabupaten','f-status','f-fungsi','f-kondisi'].forEach(id=>document.getElementById(id).value='');
       toggleKabExportBox();
-      renderRows();
+      renderRowsResetPage();
+    });
+    document.getElementById('ruas-tbody').closest('table').querySelectorAll('thead th[data-sort-key]').forEach(th=>{
+      wireSortableHeader(th, sortState, renderRows);
     });
     toggleKabExportBox();
     renderRows();
@@ -2677,7 +2710,19 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
       <div id="sv-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
       <button type="submit" class="btn-primary w-full" ${segmenList.length?'':'disabled'}>${isEdit?'Simpan Perubahan':'Simpan Survei'}</button>
     </form>`);
-  overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+
+  // Usulan #8: peringatan "perubahan belum disimpan" saat form ditutup, sama
+  // seperti mekanisme yang sudah dipasang di form Kegiatan Penanganan.
+  let svDirty = false;
+  let svSubmitted = false;
+  const svForm = overlay.querySelector('#form-survei');
+  svForm.addEventListener('input', ()=>{ svDirty = true; });
+  svForm.addEventListener('change', ()=>{ svDirty = true; });
+  overlay._confirmBeforeClose = ()=>{
+    if(svSubmitted || !svDirty) return true;
+    return confirm('Anda yakin ingin menutup? Perubahan belum disimpan.');
+  };
+  overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.closeModal());
   const getMetodeSurvei = wireLainnyaOption(overlay.querySelector('#sv-metode'), overlay.querySelector('#sv-metode-lainnya'), {known:['visual','alat_ukur','drone'], current: editData?.metode_survei});
   const existingFotoPaths = editData?.foto_paths?.length ? editData.foto_paths : (editData?.foto_path ? [editData.foto_path] : []);
   const fotoPicker = wireMultiPhotoPicker(overlay.querySelector('#sv-foto'), overlay.querySelector('#sv-foto-existing'), overlay.querySelector('#sv-foto-new'), existingFotoPaths);
@@ -2741,6 +2786,7 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
         catch(insErr){
           if(!newFiles.length && isKemungkinanErrorJaringan(insErr)){
             tambahAntreanOffline(payload);
+            svSubmitted = true;
             overlay.remove();
             notifikasiToast('Tidak ada koneksi. Data survei disimpan di perangkat & akan otomatis terkirim saat online kembali.');
             if(onSaved) onSaved(); else viewRuasDetail(ruas.id);
@@ -2749,6 +2795,7 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
           throw insErr;
         }
       }
+      svSubmitted = true;
       overlay.remove();
       notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved(); else viewRuasDetail(ruas.id);
@@ -3104,7 +3151,19 @@ function openAnggaranFormModal(ruas, editData=null, onSaved=null){
       <div id="ag-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
       <button type="submit" class="btn-primary w-full">${isEdit?'Simpan Perubahan':'Simpan Anggaran'}</button>
     </form>`);
-  overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+
+  // Usulan #8: peringatan "perubahan belum disimpan" saat form ditutup, sama
+  // seperti mekanisme yang sudah dipasang di form Kegiatan Penanganan.
+  let agDirty = false;
+  let agSubmitted = false;
+  const agForm = overlay.querySelector('#form-anggaran');
+  agForm.addEventListener('input', ()=>{ agDirty = true; });
+  agForm.addEventListener('change', ()=>{ agDirty = true; });
+  overlay._confirmBeforeClose = ()=>{
+    if(agSubmitted || !agDirty) return true;
+    return confirm('Anda yakin ingin menutup? Perubahan belum disimpan.');
+  };
+  overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.closeModal());
   const getSumberDanaAg = wireLainnyaOption(overlay.querySelector('#ag-sumber'), overlay.querySelector('#ag-sumber-lainnya'), {sentinel:'Lainnya', known:['APBD_Provinsi','APBN','DAK','Hibah'], current: editData?.sumber_dana});
   overlay.querySelector('#form-anggaran').addEventListener('submit', async (e)=>{
     e.preventDefault();
@@ -3119,6 +3178,7 @@ function openAnggaranFormModal(ruas, editData=null, onSaved=null){
     try{
       if(isEdit){ await api.updateAnggaran(editData.id, payload); }
       else{ await api.insertAnggaran(payload); }
+      agSubmitted = true;
       overlay.remove();
       notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved(); else viewRuasDetail(ruas.id);
@@ -3213,8 +3273,12 @@ async function viewKegiatan(){
   const v = document.getElementById('view');
   v.innerHTML = `<div class="skel h-10 w-full mb-4"></div>${skeletonTable(9)}`;
   try{
-    const [kegiatan, ruas, kabupaten] = await Promise.all([api.kegiatanList(), api.ruasList(), api.kabupaten()]);
+    const [kegiatan, ruas, kabupaten, dokKurangList] = await Promise.all([api.kegiatanList(), api.ruasList(), api.kabupaten(), api.kegiatanDokumenKurang().catch(()=>[])]);
     state.ruasCache = ruas;
+    // Usulan #9: peta id kegiatan -> jumlah dokumen wajib yang masih kurang, dipakai untuk
+    // menandai baris tabel Kegiatan Penanganan (bukan hanya di widget notifikasi dashboard).
+    const dokKurangById = {};
+    dokKurangList.forEach(d=>{ dokKurangById[d.penanganan_id] = d.jumlah_dokumen_kurang; });
     v.innerHTML = `
     <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
       <div><h1 class="font-display font-extrabold text-2xl text-ink-900">Kegiatan Penanganan</h1>
@@ -3237,11 +3301,19 @@ async function viewKegiatan(){
       <button id="fk-reset" class="btn-ghost !py-1.5 !px-3 text-[12.5px]">Reset Filter</button>
     </div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th>Foto</th><th>Ruas</th><th>Jenis</th><th>Sub Kegiatan</th><th>Tgl. Mulai</th><th>Tgl. Selesai</th><th>Biaya</th><th>Status</th><th>Link Dokumentasi</th>${isEditor()?'<th>Aksi</th>':''}</tr></thead>
+      <table><thead><tr>
+        <th>Foto</th><th data-sort-key="ruas">Ruas</th><th data-sort-key="jenis_penanganan">Jenis</th><th data-sort-key="sub_kegiatan">Sub Kegiatan</th>
+        <th data-sort-key="tanggal_penanganan">Tgl. Mulai</th><th data-sort-key="tanggal_selesai">Tgl. Selesai</th><th data-sort-key="biaya">Biaya</th>
+        <th data-sort-key="status_pekerjaan">Status</th><th>Link Dokumentasi</th>${isEditor()?'<th>Aksi</th>':''}
+      </tr></thead>
       <tbody id="kegiatan-tbody"></tbody></table>
     </div>
-    <div id="kegiatan-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Belum ada kegiatan penanganan yang tercatat.</div>`;
+    <div id="kegiatan-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Belum ada kegiatan penanganan yang tercatat.</div>
+    <div id="kegiatan-loadmore" class="text-center mt-4"></div>`;
 
+    // Usulan #7 & #10: state sortir kolom dan paginasi "muat lebih banyak" untuk tabel ini.
+    const sortState = {key:null, dir:'asc'};
+    const pageState = {shown:50, step:50};
     function renderRows(){
       const q = document.getElementById('fk-search').value.toLowerCase();
       const kab = document.getElementById('fk-kabupaten').value;
@@ -3250,7 +3322,7 @@ async function viewKegiatan(){
       const sumber = document.getElementById('fk-sumber').value;
       const tglDari = document.getElementById('fk-tgl-dari').value;
       const tglSampai = document.getElementById('fk-tgl-sampai').value;
-      const rows = kegiatan.filter(k=>{
+      let rows = kegiatan.filter(k=>{
         if(q && !((k.nama_ruas||'').toLowerCase().includes(q) || (k.kode_ruas||'').toLowerCase().includes(q) || (k.sub_kegiatan||'').toLowerCase().includes(q))) return false;
         if(kab && k.kabupaten_id!==kab) return false;
         if(jenis && k.jenis_penanganan!==jenis) return false;
@@ -3260,12 +3332,21 @@ async function viewKegiatan(){
         if(tglSampai && (!k.tanggal_penanganan || k.tanggal_penanganan > tglSampai)) return false;
         return true;
       });
+      rows = applySort(rows, sortState, {
+        ruas: k=>k.nama_ruas||'', jenis_penanganan: k=>k.jenis_penanganan||'', sub_kegiatan: k=>k.sub_kegiatan||'',
+        tanggal_penanganan: k=>k.tanggal_penanganan||'', tanggal_selesai: k=>k.tanggal_selesai||'',
+        biaya: k=>k.biaya!=null?Number(k.biaya):null, status_pekerjaan: k=>k.status_pekerjaan||'',
+      });
       document.getElementById('kegiatan-count').textContent = rows.length;
+      const totalRows = rows.length;
+      const shownRows = rows.slice(0, pageState.shown);
       const tbody = document.getElementById('kegiatan-tbody');
-      tbody.innerHTML = rows.map(k=>{
+      tbody.innerHTML = shownRows.map(k=>{
         const lewat = isLewatTenggat(k.tanggal_selesai, k.status_pekerjaan);
+        const jumlahDokKurang = dokKurangById[k.id] || 0;
+        const rowCls = lewat ? 'row-lewat-tenggat' : (jumlahDokKurang>0 ? 'row-dok-kurang' : '');
         return `
-        <tr class="row-hover ${lewat?'row-lewat-tenggat':''}" data-id="${k.id}">
+        <tr class="row-hover ${rowCls}" data-id="${k.id}">
           <td>${fotoThumbHtml(k.foto_awal_path || k.foto_akhir_path)}</td>
           <td><div class="flex items-center gap-1.5"><span class="font-mono text-[12px] text-navy-700 font-semibold">${k.kode_ruas}</span>${copyBtn(k.kode_ruas,'Salin kode ruas')}</div><div class="text-[12.5px]">${k.nama_ruas}</div></td>
           <td class="capitalize">${(k.jenis_penanganan||'—').replaceAll('_',' ')}${k.kejadian_bencana_id?` <span class="text-[var(--bad)]" title="Menangani kejadian bencana: ${(k.bencana_jenis_kejadian||'—').replaceAll('_',' ')} · ${fmtDate(k.bencana_tanggal_kejadian)}">⚠</span>`:''}</td>
@@ -3273,12 +3354,13 @@ async function viewKegiatan(){
           <td class="font-mono text-[12.5px]">${fmtDate(k.tanggal_penanganan)}</td>
           <td class="font-mono text-[12.5px]">${k.tanggal_selesai? fmtDate(k.tanggal_selesai) : '—'}${lewat?` <span class="text-[var(--bad)]" title="Sudah lewat target penyelesaian">⚠</span>`:''}</td>
           <td class="font-mono text-[12.5px]">${fmtRp(k.biaya)}</td>
-          <td><span class="badge ${k.status_pekerjaan==='selesai'?'badge-baik':k.status_pekerjaan==='terhenti'?'badge-rusak_berat':'badge-sedang'} capitalize">${(k.status_pekerjaan||'—').replaceAll('_',' ')}</span></td>
+          <td><span class="badge ${k.status_pekerjaan==='selesai'?'badge-baik':k.status_pekerjaan==='terhenti'?'badge-rusak_berat':'badge-sedang'} capitalize">${(k.status_pekerjaan||'—').replaceAll('_',' ')}</span>${jumlahDokKurang>0?` <span class="text-[var(--fair)]" title="${jumlahDokKurang} dokumen wajib belum lengkap">${icon('doc','w-3.5 h-3.5 inline -mt-0.5')}</span>`:''}</td>
           <td class="max-w-[160px]">${k.link_dokumentasi?`<a href="${k.link_dokumentasi}" target="_blank" rel="noopener" data-stop-row class="text-navy-700 underline text-[12.5px] truncate block">Buka Link</a>`:'<span class="text-ink-400 text-[12.5px]">—</span>'}</td>
           ${isEditor()?`<td>${actionBtns({onDetail:true, onEdit:true, onDelete:isAdmin()})}</td>`:''}
         </tr>`;
       }).join('');
-      document.getElementById('kegiatan-empty').classList.toggle('hidden', rows.length>0);
+      document.getElementById('kegiatan-empty').classList.toggle('hidden', totalRows>0);
+      renderLoadMoreBtn(document.getElementById('kegiatan-loadmore'), totalRows, pageState, renderRows);
       hydrateFotoThumbs(tbody);
       tbody.querySelectorAll('tr').forEach(tr=>{
         const kg = kegiatan.find(k=>k.id===tr.dataset.id);
@@ -3295,11 +3377,15 @@ async function viewKegiatan(){
         });
       });
     }
-    document.getElementById('fk-search').addEventListener('input', debounce(renderRows, 300));
-    ['fk-kabupaten','fk-jenis','fk-status','fk-sumber','fk-tgl-dari','fk-tgl-sampai'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    function renderRowsResetPage(){ pageState.shown = pageState.step; renderRows(); }
+    document.getElementById('fk-search').addEventListener('input', debounce(renderRowsResetPage, 300));
+    ['fk-kabupaten','fk-jenis','fk-status','fk-sumber','fk-tgl-dari','fk-tgl-sampai'].forEach(id=>document.getElementById(id).addEventListener('input', renderRowsResetPage));
     document.getElementById('fk-reset').addEventListener('click', ()=>{
       ['fk-search','fk-kabupaten','fk-jenis','fk-status','fk-sumber','fk-tgl-dari','fk-tgl-sampai'].forEach(id=>document.getElementById(id).value='');
-      renderRows();
+      renderRowsResetPage();
+    });
+    document.getElementById('kegiatan-tbody').closest('table').querySelectorAll('thead th[data-sort-key]').forEach(th=>{
+      wireSortableHeader(th, sortState, renderRows);
     });
     renderRows();
     if(isEditor()){ document.getElementById('btn-add-kegiatan').addEventListener('click', ()=>openKegiatanFormModal(ruas, null, null, ()=>viewKegiatan())); }
@@ -4371,6 +4457,56 @@ function openAuditDetailModal(log){
     ${isi}
   `);
   overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.closeModal());
+}
+// --- Usulan #7: sortir kolom tabel dengan klik header (murni logika di
+// browser, tidak menyentuh query database). Setiap tabel yang mengaktifkan
+// ini punya objek sortState {key, dir} sendiri per-view, dan setiap kolom
+// yang bisa disortir diberi atribut data-sort-key pada elemen <th>-nya. -----
+function wireSortableHeader(th, sortState, onChange){
+  th.classList.add('th-sortable');
+  th.addEventListener('click', ()=>{
+    const key = th.dataset.sortKey;
+    if(sortState.key===key){ sortState.dir = sortState.dir==='asc' ? 'desc' : 'asc'; }
+    else { sortState.key = key; sortState.dir = 'asc'; }
+    refreshSortIndicators(th.parentElement, sortState);
+    onChange();
+  });
+}
+function refreshSortIndicators(theadRow, sortState){
+  theadRow.querySelectorAll('th[data-sort-key]').forEach(th=>{
+    th.classList.remove('sort-asc','sort-desc');
+    if(th.dataset.sortKey===sortState.key) th.classList.add(sortState.dir==='desc'?'sort-desc':'sort-asc');
+  });
+}
+function applySort(rows, sortState, getters){
+  if(!sortState.key || !getters[sortState.key]) return rows;
+  const get = getters[sortState.key];
+  const sorted = [...rows].sort((a,b)=>{
+    let va = get(a), vb = get(b);
+    if(va==null && vb==null) return 0;
+    if(va==null) return 1;
+    if(vb==null) return -1;
+    if(typeof va==='string') va = va.toLowerCase();
+    if(typeof vb==='string') vb = vb.toLowerCase();
+    if(va<vb) return -1;
+    if(va>vb) return 1;
+    return 0;
+  });
+  if(sortState.dir==='desc') sorted.reverse();
+  return sorted;
+}
+// --- Usulan #10: "Muat Lebih Banyak" untuk tabel besar. Seluruh data tetap
+// dimuat & difilter/disortir seperti biasa di sisi browser; hanya jumlah
+// baris yang dirender sekaligus yang dibatasi (pageState.shown), supaya
+// tabel tetap ringan walau datanya terus bertambah. --------------------
+function renderLoadMoreBtn(containerEl, totalRows, pageState, onMore){
+  const sisa = totalRows - pageState.shown;
+  if(sisa <= 0){ containerEl.innerHTML = ''; return; }
+  containerEl.innerHTML = `<button type="button" class="btn-loadmore">Muat Lebih Banyak (${fmtNum(sisa)} lagi)</button>`;
+  containerEl.querySelector('button').addEventListener('click', ()=>{
+    pageState.shown += pageState.step;
+    onMore();
+  });
 }
 function debounce(fn, wait=350){
   let t; return (...args)=>{ clearTimeout(t); t = setTimeout(()=>fn(...args), wait); };
