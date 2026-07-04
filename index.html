@@ -3608,24 +3608,34 @@ async function viewPenugasan(){
       <button id="pn-reset" type="button" class="btn-ghost !py-1.5 !px-3 text-[12.5px]">Reset Filter</button>
     </div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th>Ruas</th><th>Kab/Kota</th><th>Staf</th><th>Target</th><th>Status</th><th>Catatan</th>${isPenugas()?'<th>Aksi</th>':''}</tr></thead>
+      <table><thead><tr><th data-sort-key="ruas">Ruas</th><th data-sort-key="kabupaten">Kab/Kota</th><th data-sort-key="staf">Staf</th><th data-sort-key="target">Target</th><th data-sort-key="status">Status</th><th>Catatan</th>${isPenugas()?'<th>Aksi</th>':''}</tr></thead>
       <tbody id="penugasan-tbody"></tbody></table>
     </div>
-    <div id="penugasan-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Belum ada penugasan survei yang cocok dengan filter.</div>`;
+    <div id="penugasan-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Belum ada penugasan survei yang cocok dengan filter.</div>
+    <div id="penugasan-loadmore" class="text-center mt-4"></div>`;
 
+    // Usulan #7 & #10: state sortir kolom dan paginasi "muat lebih banyak" untuk tabel ini.
+    const sortState = {key:null, dir:'asc'};
+    const pageState = {shown:50, step:50};
     function renderRows(){
       const q = document.getElementById('pn-search').value.toLowerCase();
       const st = document.getElementById('pn-status').value;
       const mineEl = document.getElementById('pn-mine');
       const mine = mineEl ? mineEl.checked : false;
-      const rows = penugasan.filter(p=>{
+      let rows = penugasan.filter(p=>{
         if(q && !((p.nama_ruas||'').toLowerCase().includes(q) || (p.kode_ruas||'').toLowerCase().includes(q) || (p.nama_petugas||'').toLowerCase().includes(q))) return false;
         if(st && p.status !== st) return false;
         if(mine && !(p.petugas_ids||[]).includes(state.user.id)) return false;
         return true;
       });
+      rows = applySort(rows, sortState, {
+        ruas: p=>p.nama_ruas||'', kabupaten: p=>p.kabupaten||'', staf: p=>p.nama_petugas||'',
+        target: p=>p.target_tanggal||'', status: p=>Object.keys(PENUGASAN_STATUS_LABEL).indexOf(p.status),
+      });
+      const totalRows = rows.length;
+      const shownRows = rows.slice(0, pageState.shown);
       const tbody = document.getElementById('penugasan-tbody');
-      tbody.innerHTML = rows.map(p=>{
+      tbody.innerHTML = shownRows.map(p=>{
         const canUpdateStatus = isPenugas() || (p.petugas_ids||[]).includes(state.user.id);
         const lewat = isLewatTenggat(p.target_tanggal, p.status);
         return `
@@ -3643,7 +3653,8 @@ async function viewPenugasan(){
           ${isPenugas()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
         </tr>`;
       }).join('');
-      document.getElementById('penugasan-empty').classList.toggle('hidden', rows.length>0);
+      document.getElementById('penugasan-empty').classList.toggle('hidden', totalRows>0);
+      renderLoadMoreBtn(document.getElementById('penugasan-loadmore'), totalRows, pageState, renderRows);
 
       tbody.querySelectorAll('.pn-status-select').forEach(sel=>sel.addEventListener('change', async ()=>{
         try{ await api.updatePenugasan(sel.dataset.statusId, {status: sel.value}); const item = penugasan.find(x=>x.id===sel.dataset.statusId); if(item) item.status = sel.value; sel.style.borderColor = PENUGASAN_STATUS_COLOR[sel.value]; }
@@ -3659,13 +3670,17 @@ async function viewPenugasan(){
         try{ await api.deletePenugasan(id); viewPenugasan(); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
       }));
     }
-    document.getElementById('pn-search').addEventListener('input', debounce(renderRows, 300));
-    document.getElementById('pn-status').addEventListener('input', renderRows);
-    document.getElementById('pn-mine')?.addEventListener('change', renderRows);
+    function renderRowsResetPage(){ pageState.shown = pageState.step; renderRows(); }
+    document.getElementById('pn-search').addEventListener('input', debounce(renderRowsResetPage, 300));
+    document.getElementById('pn-status').addEventListener('input', renderRowsResetPage);
+    document.getElementById('pn-mine')?.addEventListener('change', renderRowsResetPage);
     document.getElementById('pn-reset').addEventListener('click', ()=>{
       document.getElementById('pn-search').value=''; document.getElementById('pn-status').value='';
       const mineEl = document.getElementById('pn-mine'); if(mineEl) mineEl.checked=false;
-      renderRows();
+      renderRowsResetPage();
+    });
+    document.getElementById('penugasan-tbody').closest('table').querySelectorAll('thead th[data-sort-key]').forEach(th=>{
+      wireSortableHeader(th, sortState, renderRows);
     });
     renderRows();
     if(isPenugas()){ document.getElementById('btn-add-penugasan').addEventListener('click', ()=>openPenugasanFormModal(ruas, staf, null, ()=>viewPenugasan())); }
@@ -3827,20 +3842,33 @@ async function renderJembatanTab(){
       ${isEditor()?`<button id="btn-add-jembatan" class="btn-accent">+ Tambah Jembatan</button>`:''}
     </div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th>Nama Jembatan</th><th>Ruas</th><th>STA Awal</th><th>STA Akhir</th><th>Panjang (m)</th><th>Lebar (m)</th><th>Konstruksi</th><th>Kondisi</th><th>Tahun</th>${isEditor()?'<th></th>':''}</tr></thead>
+      <table><thead><tr><th data-sort-key="nama_jembatan">Nama Jembatan</th><th data-sort-key="ruas">Ruas</th><th data-sort-key="sta_awal">STA Awal</th><th data-sort-key="sta_akhir">STA Akhir</th><th data-sort-key="panjang_m">Panjang (m)</th><th data-sort-key="lebar_m">Lebar (m)</th><th data-sort-key="jenis_konstruksi">Konstruksi</th><th data-sort-key="kondisi">Kondisi</th><th data-sort-key="tahun_dibangun">Tahun</th>${isEditor()?'<th></th>':''}</tr></thead>
       <tbody id="jembatan-tbody"></tbody></table>
     </div>
-    <div id="jembatan-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada data yang cocok dengan filter.</div>`;
+    <div id="jembatan-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada data yang cocok dengan filter.</div>
+    <div id="jembatan-loadmore" class="text-center mt-4"></div>`;
 
+    // Usulan #7 & #10: state sortir kolom dan paginasi "muat lebih banyak" untuk tabel ini.
+    const sortState = {key:null, dir:'asc'};
+    const pageState = {shown:50, step:50};
     function renderRows(){
       const q = document.getElementById('fj-search').value.toLowerCase();
       const kd = document.getElementById('fj-kondisi').value;
-      const rows = data.filter(j=>{
+      let rows = data.filter(j=>{
         if(q && !((j.nama_jembatan||'').toLowerCase().includes(q) || (j.ruas_jalan?.nama_ruas||'').toLowerCase().includes(q) || (j.ruas_jalan?.kode_ruas||'').toLowerCase().includes(q))) return false;
         if(kd && j.kondisi!==kd) return false;
         return true;
       });
-      document.getElementById('jembatan-tbody').innerHTML = rows.map(j=>`
+      rows = applySort(rows, sortState, {
+        nama_jembatan: j=>j.nama_jembatan||'', ruas: j=>j.ruas_jalan?.nama_ruas||'',
+        sta_awal: j=>j.sta_awal!=null?Number(j.sta_awal):null, sta_akhir: j=>j.sta_akhir!=null?Number(j.sta_akhir):null,
+        panjang_m: j=>j.panjang_m!=null?Number(j.panjang_m):null, lebar_m: j=>j.lebar_m!=null?Number(j.lebar_m):null,
+        jenis_konstruksi: j=>j.jenis_konstruksi||'', kondisi: j=>j.kondisi!=null? KONDISI_ORDER.indexOf(j.kondisi) : 999,
+        tahun_dibangun: j=>j.tahun_dibangun!=null?Number(j.tahun_dibangun):null,
+      });
+      const totalRows = rows.length;
+      const shownRows = rows.slice(0, pageState.shown);
+      document.getElementById('jembatan-tbody').innerHTML = shownRows.map(j=>`
         <tr data-id="${j.id}">
           <td class="font-medium">${j.nama_jembatan}</td>
           <td>${j.ruas_jalan?`${j.ruas_jalan.kode_ruas} — ${j.ruas_jalan.nama_ruas}`:'—'}</td>
@@ -3853,9 +3881,10 @@ async function renderJembatanTab(){
           <td class="font-mono">${j.tahun_dibangun||'—'}</td>
           ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
         </tr>`).join('');
-      document.getElementById('jembatan-empty').classList.toggle('hidden', rows.length>0 || data.length===0);
+      document.getElementById('jembatan-empty').classList.toggle('hidden', totalRows>0 || data.length===0);
       const tbody = document.getElementById('jembatan-tbody');
       if(data.length===0) tbody.innerHTML = `<tr><td colspan="10" class="text-center text-ink-400 py-8">Belum ada data jembatan.</td></tr>`;
+      renderLoadMoreBtn(document.getElementById('jembatan-loadmore'), totalRows, pageState, renderRows);
       tbody.querySelectorAll('tr[data-id]').forEach(tr=>{
         const j = data.find(x=>x.id===tr.dataset.id);
         tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openJembatanFormModal(ruas, j, renderJembatanTab));
@@ -3865,11 +3894,15 @@ async function renderJembatanTab(){
         });
       });
     }
-    document.getElementById('fj-search').addEventListener('input', debounce(renderRows, 300));
-    document.getElementById('fj-kondisi').addEventListener('input', renderRows);
+    function renderRowsResetPage(){ pageState.shown = pageState.step; renderRows(); }
+    document.getElementById('fj-search').addEventListener('input', debounce(renderRowsResetPage, 300));
+    document.getElementById('fj-kondisi').addEventListener('input', renderRowsResetPage);
     document.getElementById('fj-reset').addEventListener('click', ()=>{
       document.getElementById('fj-search').value=''; document.getElementById('fj-kondisi').value='';
-      renderRows();
+      renderRowsResetPage();
+    });
+    document.getElementById('jembatan-tbody').closest('table').querySelectorAll('thead th[data-sort-key]').forEach(th=>{
+      wireSortableHeader(th, sortState, renderRows);
     });
     renderRows();
     if(isEditor()){ document.getElementById('btn-add-jembatan').addEventListener('click', ()=>openJembatanFormModal(ruas, null, renderJembatanTab)); }
@@ -3948,23 +3981,34 @@ async function renderDrainaseTab(){
       ${isEditor()?`<button id="btn-add-drainase" class="btn-accent">+ Tambah Drainase</button>`:''}
     </div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th>Ruas</th><th>Segmen</th><th>Jenis</th><th>Sisi</th><th>STA Awal</th><th>STA Akhir</th><th>Panjang (m)</th><th>Kondisi</th>${isEditor()?'<th></th>':''}</tr></thead>
+      <table><thead><tr><th>Ruas</th><th>Segmen</th><th data-sort-key="jenis">Jenis</th><th data-sort-key="sisi">Sisi</th><th data-sort-key="sta_awal">STA Awal</th><th data-sort-key="sta_akhir">STA Akhir</th><th data-sort-key="panjang_m">Panjang (m)</th><th data-sort-key="kondisi">Kondisi</th>${isEditor()?'<th></th>':''}</tr></thead>
       <tbody id="drainase-tbody"></tbody></table>
     </div>
-    <div id="drainase-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada data yang cocok dengan filter.</div>`;
+    <div id="drainase-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada data yang cocok dengan filter.</div>
+    <div id="drainase-loadmore" class="text-center mt-4"></div>`;
 
+    // Usulan #7 & #10: state sortir kolom dan paginasi "muat lebih banyak" untuk tabel ini.
+    const sortState = {key:null, dir:'asc'};
+    const pageState = {shown:50, step:50};
     function renderRows(){
       const q = document.getElementById('fd-search').value.toLowerCase();
       const jenis = document.getElementById('fd-jenis').value;
       const kd = document.getElementById('fd-kondisi').value;
-      const rows = data.filter(d=>{
+      let rows = data.filter(d=>{
         const namaRuas = d.segmen_jalan?.ruas_jalan?.nama_ruas||''; const kodeRuas = d.segmen_jalan?.ruas_jalan?.kode_ruas||''; const kodeSeg = d.segmen_jalan?.kode_segmen||'';
         if(q && !(namaRuas.toLowerCase().includes(q) || kodeRuas.toLowerCase().includes(q) || kodeSeg.toLowerCase().includes(q))) return false;
         if(jenis && d.jenis!==jenis) return false;
         if(kd && d.kondisi!==kd) return false;
         return true;
       });
-      document.getElementById('drainase-tbody').innerHTML = rows.map(d=>`
+      rows = applySort(rows, sortState, {
+        jenis: d=>d.jenis||'', sisi: d=>d.sisi||'',
+        sta_awal: d=>d.sta_awal!=null?Number(d.sta_awal):null, sta_akhir: d=>d.sta_akhir!=null?Number(d.sta_akhir):null,
+        panjang_m: d=>d.panjang_m!=null?Number(d.panjang_m):null, kondisi: d=>d.kondisi!=null? KONDISI_ORDER.indexOf(d.kondisi) : 999,
+      });
+      const totalRows = rows.length;
+      const shownRows = rows.slice(0, pageState.shown);
+      document.getElementById('drainase-tbody').innerHTML = shownRows.map(d=>`
         <tr data-id="${d.id}">
           <td>${d.segmen_jalan?.ruas_jalan? `${d.segmen_jalan.ruas_jalan.kode_ruas} — ${d.segmen_jalan.ruas_jalan.nama_ruas}`:'—'}</td>
           <td class="font-mono text-[12.5px]">${d.segmen_jalan?.kode_segmen||'—'}</td>
@@ -3976,9 +4020,10 @@ async function renderDrainaseTab(){
           <td>${badge(d.kondisi)}</td>
           ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
         </tr>`).join('');
-      document.getElementById('drainase-empty').classList.toggle('hidden', rows.length>0 || data.length===0);
+      document.getElementById('drainase-empty').classList.toggle('hidden', totalRows>0 || data.length===0);
       const tbody = document.getElementById('drainase-tbody');
       if(data.length===0) tbody.innerHTML = `<tr><td colspan="9" class="text-center text-ink-400 py-8">Belum ada data drainase.</td></tr>`;
+      renderLoadMoreBtn(document.getElementById('drainase-loadmore'), totalRows, pageState, renderRows);
       tbody.querySelectorAll('tr[data-id]').forEach(tr=>{
         const d = data.find(x=>x.id===tr.dataset.id);
         tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openDrainaseFormModal(ruas, d, renderDrainaseTab));
@@ -3988,11 +4033,15 @@ async function renderDrainaseTab(){
         });
       });
     }
-    document.getElementById('fd-search').addEventListener('input', debounce(renderRows, 300));
-    ['fd-jenis','fd-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    function renderRowsResetPage(){ pageState.shown = pageState.step; renderRows(); }
+    document.getElementById('fd-search').addEventListener('input', debounce(renderRowsResetPage, 300));
+    ['fd-jenis','fd-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRowsResetPage));
     document.getElementById('fd-reset').addEventListener('click', ()=>{
       document.getElementById('fd-search').value=''; document.getElementById('fd-jenis').value=''; document.getElementById('fd-kondisi').value='';
-      renderRows();
+      renderRowsResetPage();
+    });
+    document.getElementById('drainase-tbody').closest('table').querySelectorAll('thead th[data-sort-key]').forEach(th=>{
+      wireSortableHeader(th, sortState, renderRows);
     });
     renderRows();
     if(isEditor()){ document.getElementById('btn-add-drainase').addEventListener('click', ()=>openDrainaseFormModal(ruas, null, renderDrainaseTab)); }
@@ -4087,23 +4136,33 @@ async function renderPerlengkapanTab(){
       ${isEditor()?`<button id="btn-add-perlengkapan" class="btn-accent">+ Tambah Perlengkapan</button>`:''}
     </div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th>Ruas</th><th>Segmen</th><th>Jenis</th><th>STA Awal</th><th>STA Akhir</th><th>Jumlah</th><th>Kondisi</th>${isEditor()?'<th></th>':''}</tr></thead>
+      <table><thead><tr><th>Ruas</th><th>Segmen</th><th data-sort-key="jenis">Jenis</th><th data-sort-key="sta_awal">STA Awal</th><th data-sort-key="sta_akhir">STA Akhir</th><th data-sort-key="jumlah">Jumlah</th><th data-sort-key="kondisi">Kondisi</th>${isEditor()?'<th></th>':''}</tr></thead>
       <tbody id="perlengkapan-tbody"></tbody></table>
     </div>
-    <div id="perlengkapan-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada data yang cocok dengan filter.</div>`;
+    <div id="perlengkapan-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada data yang cocok dengan filter.</div>
+    <div id="perlengkapan-loadmore" class="text-center mt-4"></div>`;
 
+    // Usulan #7 & #10: state sortir kolom dan paginasi "muat lebih banyak" untuk tabel ini.
+    const sortState = {key:null, dir:'asc'};
+    const pageState = {shown:50, step:50};
     function renderRows(){
       const q = document.getElementById('fp-search').value.toLowerCase();
       const jenis = document.getElementById('fp-jenis').value;
       const kd = document.getElementById('fp-kondisi').value;
-      const rows = data.filter(p=>{
+      let rows = data.filter(p=>{
         const namaRuas = p.segmen_jalan?.ruas_jalan?.nama_ruas||''; const kodeRuas = p.segmen_jalan?.ruas_jalan?.kode_ruas||''; const kodeSeg = p.segmen_jalan?.kode_segmen||'';
         if(q && !(namaRuas.toLowerCase().includes(q) || kodeRuas.toLowerCase().includes(q) || kodeSeg.toLowerCase().includes(q))) return false;
         if(jenis && p.jenis!==jenis) return false;
         if(kd && p.kondisi!==kd) return false;
         return true;
       });
-      document.getElementById('perlengkapan-tbody').innerHTML = rows.map(p=>`
+      rows = applySort(rows, sortState, {
+        jenis: p=>p.jenis||'', sta_awal: p=>p.sta_awal!=null?Number(p.sta_awal):null, sta_akhir: p=>p.sta_akhir!=null?Number(p.sta_akhir):null,
+        jumlah: p=>p.jumlah!=null?Number(p.jumlah):null, kondisi: p=>p.kondisi!=null? KONDISI_ORDER.indexOf(p.kondisi) : 999,
+      });
+      const totalRows = rows.length;
+      const shownRows = rows.slice(0, pageState.shown);
+      document.getElementById('perlengkapan-tbody').innerHTML = shownRows.map(p=>`
         <tr data-id="${p.id}">
           <td>${p.segmen_jalan?.ruas_jalan? `${p.segmen_jalan.ruas_jalan.kode_ruas} — ${p.segmen_jalan.ruas_jalan.nama_ruas}`:'—'}</td>
           <td class="font-mono text-[12.5px]">${p.segmen_jalan?.kode_segmen||'—'}</td>
@@ -4114,9 +4173,10 @@ async function renderPerlengkapanTab(){
           <td>${badge(p.kondisi)}</td>
           ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
         </tr>`).join('');
-      document.getElementById('perlengkapan-empty').classList.toggle('hidden', rows.length>0 || data.length===0);
+      document.getElementById('perlengkapan-empty').classList.toggle('hidden', totalRows>0 || data.length===0);
       const tbody = document.getElementById('perlengkapan-tbody');
       if(data.length===0) tbody.innerHTML = `<tr><td colspan="8" class="text-center text-ink-400 py-8">Belum ada data perlengkapan jalan.</td></tr>`;
+      renderLoadMoreBtn(document.getElementById('perlengkapan-loadmore'), totalRows, pageState, renderRows);
       tbody.querySelectorAll('tr[data-id]').forEach(tr=>{
         const p = data.find(x=>x.id===tr.dataset.id);
         tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openPerlengkapanFormModal(ruas, p, renderPerlengkapanTab));
@@ -4126,11 +4186,15 @@ async function renderPerlengkapanTab(){
         });
       });
     }
-    document.getElementById('fp-search').addEventListener('input', debounce(renderRows, 300));
-    ['fp-jenis','fp-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    function renderRowsResetPage(){ pageState.shown = pageState.step; renderRows(); }
+    document.getElementById('fp-search').addEventListener('input', debounce(renderRowsResetPage, 300));
+    ['fp-jenis','fp-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRowsResetPage));
     document.getElementById('fp-reset').addEventListener('click', ()=>{
       document.getElementById('fp-search').value=''; document.getElementById('fp-jenis').value=''; document.getElementById('fp-kondisi').value='';
-      renderRows();
+      renderRowsResetPage();
+    });
+    document.getElementById('perlengkapan-tbody').closest('table').querySelectorAll('thead th[data-sort-key]').forEach(th=>{
+      wireSortableHeader(th, sortState, renderRows);
     });
     renderRows();
     if(isEditor()){ document.getElementById('btn-add-perlengkapan').addEventListener('click', ()=>openPerlengkapanFormModal(ruas, null, renderPerlengkapanTab)); }
@@ -4222,21 +4286,32 @@ async function renderLalulintasTab(){
       </div>
     </div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th>Ruas</th><th>Segmen</th><th>Tahun</th><th>LHR (smp/hari)</th><th>Kend. Ringan</th><th>Kend. Berat</th><th>Sepeda Motor</th><th>Sumber</th>${isEditor()?'<th></th>':''}</tr></thead>
+      <table><thead><tr><th>Ruas</th><th>Segmen</th><th data-sort-key="tahun">Tahun</th><th data-sort-key="lhr">LHR (smp/hari)</th><th data-sort-key="kendaraan_ringan">Kend. Ringan</th><th data-sort-key="kendaraan_berat">Kend. Berat</th><th data-sort-key="sepeda_motor">Sepeda Motor</th><th data-sort-key="sumber_data">Sumber</th>${isEditor()?'<th></th>':''}</tr></thead>
       <tbody id="lalin-tbody"></tbody></table>
     </div>
-    <div id="lalin-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada data yang cocok dengan filter.</div>`;
+    <div id="lalin-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada data yang cocok dengan filter.</div>
+    <div id="lalin-loadmore" class="text-center mt-4"></div>`;
 
+    // Usulan #7 & #10: state sortir kolom dan paginasi "muat lebih banyak" untuk tabel ini.
+    const sortState = {key:null, dir:'asc'};
+    const pageState = {shown:50, step:50};
     function renderRows(){
       const q = document.getElementById('fl-search').value.toLowerCase();
       const th = document.getElementById('fl-tahun').value;
-      const rows = data.filter(l=>{
+      let rows = data.filter(l=>{
         const namaRuas = l.segmen_jalan?.ruas_jalan?.nama_ruas||''; const kodeRuas = l.segmen_jalan?.ruas_jalan?.kode_ruas||''; const kodeSeg = l.segmen_jalan?.kode_segmen||'';
         if(q && !(namaRuas.toLowerCase().includes(q) || kodeRuas.toLowerCase().includes(q) || kodeSeg.toLowerCase().includes(q))) return false;
         if(th && String(l.tahun)!==th) return false;
         return true;
       });
-      document.getElementById('lalin-tbody').innerHTML = rows.map(l=>`
+      rows = applySort(rows, sortState, {
+        tahun: l=>l.tahun!=null?Number(l.tahun):null, lhr: l=>l.lhr!=null?Number(l.lhr):null,
+        kendaraan_ringan: l=>l.kendaraan_ringan!=null?Number(l.kendaraan_ringan):null, kendaraan_berat: l=>l.kendaraan_berat!=null?Number(l.kendaraan_berat):null,
+        sepeda_motor: l=>l.sepeda_motor!=null?Number(l.sepeda_motor):null, sumber_data: l=>l.sumber_data||'',
+      });
+      const totalRows = rows.length;
+      const shownRows = rows.slice(0, pageState.shown);
+      document.getElementById('lalin-tbody').innerHTML = shownRows.map(l=>`
         <tr data-id="${l.id}">
           <td>${l.segmen_jalan?.ruas_jalan? `${l.segmen_jalan.ruas_jalan.kode_ruas} — ${l.segmen_jalan.ruas_jalan.nama_ruas}`:'—'}</td>
           <td class="font-mono text-[12.5px]">${l.segmen_jalan?.kode_segmen||'—'}</td>
@@ -4248,9 +4323,10 @@ async function renderLalulintasTab(){
           <td class="text-ink-500 text-[12.5px]">${l.sumber_data||'—'}</td>
           ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
         </tr>`).join('');
-      document.getElementById('lalin-empty').classList.toggle('hidden', rows.length>0 || data.length===0);
+      document.getElementById('lalin-empty').classList.toggle('hidden', totalRows>0 || data.length===0);
       const tbody = document.getElementById('lalin-tbody');
       if(data.length===0) tbody.innerHTML = `<tr><td colspan="9" class="text-center text-ink-400 py-8">Belum ada data lalu lintas.</td></tr>`;
+      renderLoadMoreBtn(document.getElementById('lalin-loadmore'), totalRows, pageState, renderRows);
       tbody.querySelectorAll('tr[data-id]').forEach(tr=>{
         const l = data.find(x=>x.id===tr.dataset.id);
         tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openLalulintasFormModal(ruas, l, renderLalulintasTab));
@@ -4260,11 +4336,15 @@ async function renderLalulintasTab(){
         });
       });
     }
-    document.getElementById('fl-search').addEventListener('input', debounce(renderRows, 300));
-    document.getElementById('fl-tahun').addEventListener('input', renderRows);
+    function renderRowsResetPage(){ pageState.shown = pageState.step; renderRows(); }
+    document.getElementById('fl-search').addEventListener('input', debounce(renderRowsResetPage, 300));
+    document.getElementById('fl-tahun').addEventListener('input', renderRowsResetPage);
     document.getElementById('fl-reset').addEventListener('click', ()=>{
       document.getElementById('fl-search').value=''; document.getElementById('fl-tahun').value='';
-      renderRows();
+      renderRowsResetPage();
+    });
+    document.getElementById('lalin-tbody').closest('table').querySelectorAll('thead th[data-sort-key]').forEach(th=>{
+      wireSortableHeader(th, sortState, renderRows);
     });
     renderRows();
 
@@ -4531,31 +4611,50 @@ async function viewLogAktivitas(){
       <button id="f-audit-reset" type="button" class="btn-ghost">Reset Filter</button>
     </div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th>Waktu</th><th>Tabel</th><th>Aksi</th><th>Oleh</th><th>Ringkasan Perubahan</th><th></th></tr></thead>
+      <table><thead><tr><th data-sort-key="waktu">Waktu</th><th data-sort-key="tabel">Tabel</th><th data-sort-key="aksi">Aksi</th><th data-sort-key="oleh">Oleh</th><th>Ringkasan Perubahan</th><th></th></tr></thead>
       <tbody id="audit-tbody">${skeletonRows(6)}</tbody></table>
-    </div>`;
+    </div>
+    <div id="audit-loadmore" class="text-center mt-4"></div>`;
 
   let currentLogs = [];
+  // Usulan #7 & #10: state sortir kolom dan paginasi "muat lebih banyak" untuk tabel ini.
+  const sortState = {key:null, dir:'desc'};
+  const pageState = {shown:50, step:50};
+  document.getElementById('audit-tbody').closest('table').querySelectorAll('thead th[data-sort-key]').forEach(th=>{
+    wireSortableHeader(th, sortState, ()=>renderLogRows());
+  });
+  function renderLogRows(){
+    const tbody = document.getElementById('audit-tbody');
+    let logs = applySort(currentLogs, sortState, {
+      waktu: l=>new Date(l.created_at).getTime(), tabel: l=>AUDIT_TABEL_LABEL[l.tabel]||l.tabel,
+      aksi: l=>AUDIT_AKSI_LABEL[l.aksi]||l.aksi, oleh: l=>l.actor_nama||'',
+    });
+    const totalRows = logs.length;
+    const shownLogs = logs.slice(0, pageState.shown);
+    tbody.innerHTML = shownLogs.length? shownLogs.map((l,i)=>`
+      <tr>
+        <td class="font-mono text-[12px] whitespace-nowrap">${new Date(l.created_at).toLocaleString('id-ID')}</td>
+        <td>${AUDIT_TABEL_LABEL[l.tabel]||l.tabel}</td>
+        <td><span class="badge ${l.aksi==='delete'?'badge-rusak_berat':l.aksi==='insert'?'badge-baik':'badge-sedang'}">${AUDIT_AKSI_LABEL[l.aksi]||l.aksi}</span></td>
+        <td class="text-[12.5px]">${l.actor_nama||'Sistem'}</td>
+        <td class="text-[12.5px] text-ink-600 max-w-[420px]">${ringkasPerubahan(l.data_lama, l.data_baru)}</td>
+        <td><button type="button" data-detail="${i}" class="btn-ghost !py-1.5 !px-2.5 text-[12px]">Detail</button></td>
+      </tr>`).join('') : `<tr><td colspan="6" class="text-center text-ink-400 py-8">Tidak ada aktivitas yang cocok dengan filter.</td></tr>`;
+    renderLoadMoreBtn(document.getElementById('audit-loadmore'), totalRows, pageState, renderLogRows);
+    tbody.querySelectorAll('[data-detail]').forEach(btn=>{
+      btn.addEventListener('click', ()=>openAuditDetailModal(shownLogs[Number(btn.dataset.detail)]));
+    });
+  }
   async function loadAndRender(){
     const tbody = document.getElementById('audit-tbody');
     tbody.innerHTML = skeletonRows(6);
     try{
       const logs = await api.auditLog({limit:300, tabel:filter.tabel||undefined, aksi:filter.aksi||undefined, actorNama:filter.actorNama||undefined, dari:filter.dari||undefined, sampai:filter.sampai||undefined});
       currentLogs = logs;
+      pageState.shown = pageState.step;
       const adaFilter = filter.tabel||filter.aksi||filter.actorNama||filter.dari||filter.sampai;
       document.getElementById('audit-subtitle').textContent = `${logs.length} entri ${adaFilter?'sesuai filter':'terbaru'}${logs.length>=300?' (dibatasi 300, persempit filter untuk hasil lebih spesifik)':''}`;
-      tbody.innerHTML = logs.length? logs.map((l,i)=>`
-        <tr>
-          <td class="font-mono text-[12px] whitespace-nowrap">${new Date(l.created_at).toLocaleString('id-ID')}</td>
-          <td>${AUDIT_TABEL_LABEL[l.tabel]||l.tabel}</td>
-          <td><span class="badge ${l.aksi==='delete'?'badge-rusak_berat':l.aksi==='insert'?'badge-baik':'badge-sedang'}">${AUDIT_AKSI_LABEL[l.aksi]||l.aksi}</span></td>
-          <td class="text-[12.5px]">${l.actor_nama||'Sistem'}</td>
-          <td class="text-[12.5px] text-ink-600 max-w-[420px]">${ringkasPerubahan(l.data_lama, l.data_baru)}</td>
-          <td><button type="button" data-detail="${i}" class="btn-ghost !py-1.5 !px-2.5 text-[12px]">Detail</button></td>
-        </tr>`).join('') : `<tr><td colspan="6" class="text-center text-ink-400 py-8">Tidak ada aktivitas yang cocok dengan filter.</td></tr>`;
-      tbody.querySelectorAll('[data-detail]').forEach(btn=>{
-        btn.addEventListener('click', ()=>openAuditDetailModal(logs[Number(btn.dataset.detail)]));
-      });
+      renderLogRows();
     }catch(err){ tbody.innerHTML = `<tr><td colspan="6" class="text-center text-[13px] text-[var(--bad)] py-8">${terjemahkanErrorDb(err)}</td></tr>`; }
   }
 
