@@ -54,6 +54,8 @@
   .btn-accent:hover{background:var(--accent-dark); color:#fff;}
   .btn-ghost{border:1px solid var(--line); color:var(--ink-600); border-radius:10px; padding:9px 16px; font-weight:600; transition:.15s;}
   .btn-ghost:hover{border-color:var(--navy-600); color:var(--navy-700);}
+  .btn-danger{background:var(--bad); color:#fff; font-weight:600; border-radius:10px; padding:10px 18px; transition:.15s;}
+  .btn-danger:hover{background:#A5312F;}
   input,select,textarea{background:#fff; border:1px solid var(--line); border-radius:8px; padding:8px 12px; font-size:14px; width:100%;}
   input:focus,select:focus,textarea:focus{outline:2px solid var(--navy-600); outline-offset:0; border-color:var(--navy-600);}
   input[type=file]{width:100%; max-width:100%; padding:6px 8px; font-size:12px; box-sizing:border-box; overflow:hidden; text-overflow:ellipsis;}
@@ -145,8 +147,11 @@ function updateOfflineBadge(){
   const n = getAntreanOffline().length;
   if(badge){ badge.textContent = n; badge.classList.toggle('hidden', n===0); }
 }
-function notifikasiToast(msg){
-  const t = el(`<div class="fixed bottom-5 left-1/2 -translate-x-1/2 z-[60] bg-navy-900 text-white text-[13px] font-medium px-4 py-2.5 rounded-xl shadow-lg">${msg}</div>`);
+function notifikasiToast(msg, type='info'){
+  const iconHtml = type==='success'
+    ? `<span class="w-4 h-4 rounded-full bg-[var(--good)] flex items-center justify-center shrink-0">${icon('check','w-2.5 h-2.5 text-white')}</span>`
+    : '';
+  const t = el(`<div class="fixed bottom-5 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-2 bg-navy-900 text-white text-[13px] font-medium px-4 py-2.5 rounded-xl shadow-lg">${iconHtml}<span>${msg}</span></div>`);
   document.body.appendChild(t);
   setTimeout(()=>t.remove(), 4000);
 }
@@ -921,7 +926,29 @@ function actionBtns({onEdit, onDelete, onDetail}={}){
   html += '</div>';
   return html;
 }
-async function confirmDelete(msg){ return window.confirm(msg || 'Yakin ingin menghapus data ini? Tindakan ini tidak dapat dibatalkan.'); }
+function confirmDelete(msg){
+  return new Promise((resolve)=>{
+    const overlay = el(`<div class="modal-overlay fixed inset-0 z-[70] flex items-center justify-center p-4"></div>`);
+    overlay.innerHTML = `
+      <div class="card w-full max-w-sm p-6 relative text-center">
+        <div class="w-11 h-11 rounded-full bg-[#FBE4E4] text-[var(--bad)] flex items-center justify-center mx-auto mb-3">${icon('trash','w-5 h-5')}</div>
+        <h3 class="font-display font-extrabold text-[15.5px] text-ink-900 mb-1.5">Hapus data ini?</h3>
+        <p class="text-[13px] text-ink-500 leading-relaxed mb-5">${msg || 'Yakin ingin menghapus data ini? Tindakan ini tidak dapat dibatalkan.'}</p>
+        <div class="flex gap-2.5">
+          <button type="button" data-act="batal" class="btn-ghost flex-1">Batal</button>
+          <button type="button" data-act="hapus" class="btn-danger flex-1">Hapus</button>
+        </div>
+      </div>`;
+    function close(result){ overlay.remove(); document.removeEventListener('keydown', onKey); resolve(result); }
+    function onKey(e){ if(e.key==='Escape') close(false); }
+    overlay.addEventListener('click', (e)=>{ if(e.target===overlay) close(false); });
+    overlay.querySelector('[data-act="batal"]').addEventListener('click', ()=>close(false));
+    overlay.querySelector('[data-act="hapus"]').addEventListener('click', ()=>close(true));
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(overlay);
+    overlay.querySelector('[data-act="hapus"]').focus();
+  });
+}
 function icon(name, cls='w-5 h-5'){ return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||''}</svg>`; }
 
 function sidebarLink(n, collapsed){
@@ -1569,7 +1596,15 @@ async function viewPeta(){
     </label>
   </div>
   <div class="card p-3">
-    <div id="map" style="height:560px;"></div>
+    <div class="relative">
+      <div id="map" style="height:560px;"></div>
+      <div id="map-loading" class="absolute inset-0 z-[400] flex items-center justify-center bg-white/70 rounded-xl">
+        <div class="flex items-center gap-2.5 text-[13px] font-semibold text-ink-500">
+          <span class="w-4 h-4 rounded-full border-2 border-ink-300 border-t-navy-700 animate-spin"></span>
+          Memuat data peta…
+        </div>
+      </div>
+    </div>
   </div>
   <div class="flex flex-wrap gap-4 mt-3" id="peta-legend">
     ${KONDISI_ORDER.map(k=>`<div class="flex items-center gap-1.5 text-[12px] text-ink-600"><span class="w-2.5 h-2.5 rounded-full" style="background:${KONDISI_COLOR[k]}"></span>${KONDISI_LABEL[k]}</div>`).join('')}
@@ -1787,6 +1822,7 @@ async function viewPeta(){
     }
 
     drawSafe();
+    document.getElementById('map-loading')?.remove();
 
     document.getElementById('peta-mode-toggle').addEventListener('click', (e)=>{
       const btn = e.target.closest('button[data-mode]');
@@ -1817,7 +1853,7 @@ async function viewPeta(){
       if(e.target.checked){ lalinLayerGroup.addTo(map); document.getElementById('peta-legend-lalin').classList.remove('hidden'); document.getElementById('peta-legend-lalin').classList.add('flex'); }
       else { map.removeLayer(lalinLayerGroup); document.getElementById('peta-legend-lalin').classList.add('hidden'); document.getElementById('peta-legend-lalin').classList.remove('flex'); }
     });
-  }catch(err){ v.insertAdjacentHTML('beforeend', errorPanel(err)); }
+  }catch(err){ document.getElementById('map-loading')?.remove(); v.insertAdjacentHTML('beforeend', errorPanel(err)); }
 }
 function emptyStateMap(){
   return `<div class="card p-5 flex items-start gap-3 border-dashed">
@@ -2190,6 +2226,7 @@ function openRuasFormModal(kabupaten, editData=null){
       if(isEdit){ await api.updateRuas(editData.id, payload); }
       else{ payload.created_by = state.user.id; await api.insertRuas(payload); }
       overlay.remove();
+      notifikasiToast('Data berhasil disimpan.', 'success');
       if(isEdit && state.selectedRuasId===editData.id){ viewRuasDetail(editData.id); } else { viewRuas(); }
     }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
   });
@@ -2313,6 +2350,7 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
         }
       }
       overlay.remove();
+      notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved(); else viewRuasDetail(ruas.id);
     }catch(err){
       submitBtn.textContent = submitLabel;
@@ -2513,6 +2551,7 @@ function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=nul
       if(isEdit){ await api.updatePenanganan(editData.id, payload, editData?.updated_at || null); }
       else{ payload.created_by = state.user.id; await api.insertPenanganan(payload); }
       overlay.remove();
+      notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved(); else viewKegiatan();
     }catch(err){
       submitBtn.textContent = submitLabel; submitBtn.disabled = false;
@@ -2640,6 +2679,7 @@ function openAnggaranFormModal(ruas, editData=null, onSaved=null){
       if(isEdit){ await api.updateAnggaran(editData.id, payload); }
       else{ await api.insertAnggaran(payload); }
       overlay.remove();
+      notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved(); else viewRuasDetail(ruas.id);
     }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
   });
@@ -2721,6 +2761,7 @@ function openBencanaFormModal(ruasList, editData=null, onSaved=null, presetRuasI
       if(isEdit){ await api.updateBencana(editData.id, payload); }
       else{ payload.created_by = state.user.id; await api.insertBencana(payload); }
       overlay.remove();
+      notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved(); else viewBencana();
     }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
   });
@@ -3141,6 +3182,7 @@ function openPenugasanFormModal(ruasList, stafList, editData=null, onSaved=null)
       if(isEdit){ await api.updatePenugasan(editData.id, payload, petugasIds); }
       else{ await api.insertPenugasan(payload, petugasIds); }
       overlay.remove();
+      notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved();
     }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
   });
@@ -3332,6 +3374,7 @@ function openJembatanFormModal(ruasList, editData=null, onSaved=null){
     try{
       if(isEdit){ await api.updateJembatan(editData.id, payload); } else { await api.insertJembatan(payload); }
       overlay.remove();
+      notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved();
     }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
   });
@@ -3464,6 +3507,7 @@ function openDrainaseFormModal(ruasList, editData=null, onSaved=null){
     try{
       if(isEdit){ await api.updateDrainase(editData.id, payload); } else { await api.insertDrainase(payload); }
       overlay.remove();
+      notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved();
     }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
   });
@@ -3590,6 +3634,7 @@ function openPerlengkapanFormModal(ruasList, editData=null, onSaved=null){
     try{
       if(isEdit){ await api.updatePerlengkapan(editData.id, payload); } else { await api.insertPerlengkapan(payload); }
       overlay.remove();
+      notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved();
     }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
   });
@@ -3713,6 +3758,7 @@ function openLalulintasFormModal(ruasList, editData=null, onSaved=null){
     try{
       if(isEdit){ await api.updateLalulintas(editData.id, payload); } else { await api.insertLalulintas(payload); }
       overlay.remove();
+      notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved();
     }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
   });
@@ -3760,6 +3806,7 @@ function openLalulintasRuasFormModal(ruas, segmenList, editData=null, onSaved=nu
     try{
       if(isEdit){ await api.updateLalulintas(editData.id, payload); } else { await api.insertLalulintas(payload); }
       overlay.remove();
+      notifikasiToast('Data berhasil disimpan.', 'success');
       if(onSaved) onSaved();
     }catch(err){ errBox.textContent = err.message; errBox.classList.remove('hidden'); }
   });
