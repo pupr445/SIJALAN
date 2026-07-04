@@ -117,8 +117,47 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Registrasi service worker (mode offline: app shell tetap terbuka tanpa sinyal).
+// Usulan #6: notifikasi pembaruan aplikasi (PWA) — saat service worker
+// mendeteksi rilis baru sudah ter-install & menunggu (waiting), tampilkan
+// banner "Versi baru tersedia, muat ulang?" alih-alih diam-diam mengganti versi.
 if('serviceWorker' in navigator){
-  window.addEventListener('load', ()=>{ navigator.serviceWorker.register('./sw.js').catch(e=>console.error('[sw] gagal daftar:', e)); });
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('./sw.js').then(reg=>{
+      if(reg.waiting) tampilkanBannerUpdatePwa(reg);
+      reg.addEventListener('updatefound', ()=>{
+        const worker = reg.installing;
+        if(!worker) return;
+        worker.addEventListener('statechange', ()=>{
+          // state 'installed' + sudah ada controller aktif = ini rilis BARU
+          // (bukan instalasi PWA pertama kali), jadi versi lama masih dipakai.
+          if(worker.state==='installed' && navigator.serviceWorker.controller){
+            tampilkanBannerUpdatePwa(reg);
+          }
+        });
+      });
+    }).catch(e=>console.error('[sw] gagal daftar:', e));
+    let sudahReload = false;
+    navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+      if(sudahReload) return; sudahReload = true;
+      window.location.reload();
+    });
+  });
+}
+function tampilkanBannerUpdatePwa(reg){
+  if(document.getElementById('pwa-update-banner')) return;
+  const bar = document.createElement('div');
+  bar.id = 'pwa-update-banner';
+  bar.className = 'fixed bottom-0 inset-x-0 z-[9998] bg-navy-950 text-white px-4 py-3 flex items-center justify-center gap-3 flex-wrap text-[13px] shadow-[0_-2px_12px_rgba(0,0,0,.25)]';
+  bar.innerHTML = `
+    <span>Versi baru SIJALAN tersedia.</span>
+    <button id="pwa-update-reload" type="button" class="btn-accent !py-1.5 !px-3 !text-[12.5px]">Muat Ulang</button>
+    <button id="pwa-update-nanti" type="button" class="text-white/70 hover:text-white text-[12px] underline">Nanti saja</button>`;
+  document.body.appendChild(bar);
+  document.getElementById('pwa-update-reload').addEventListener('click', ()=>{
+    reg.waiting?.postMessage('SKIP_WAITING');
+    bar.remove();
+  });
+  document.getElementById('pwa-update-nanti').addEventListener('click', ()=>bar.remove());
 }
 
 // --- 2. STATE GLOBAL ------------------------------------------------------
@@ -187,6 +226,63 @@ window.addEventListener('offline', ()=>{ updateConnBadge(); });
 function updateConnBadge(){
   const b = document.getElementById('conn-badge');
   if(b) b.classList.toggle('hidden', navigator.onLine);
+}
+
+// --- Usulan #4: tombol salin (copy) kode ruas / koordinat GPS -------------
+// copyBtn(text, title) menghasilkan ikon kecil yang bisa diklik untuk menyalin
+// `text` ke clipboard perangkat, memudahkan petugas lapangan menempelkan kode
+// ruas/koordinat ke WhatsApp atau laporan manual tanpa mengetik ulang.
+function copyBtn(text, title='Salin'){
+  if(text===null||text===undefined||text==='') return '';
+  return `<button type="button" class="copy-btn text-ink-400 hover:text-navy-700 shrink-0" data-copy-text="${String(text).replace(/"/g,'&quot;')}" title="${title}" onclick="event.stopPropagation()">${icon('copy','w-3.5 h-3.5')}</button>`;
+}
+async function copyToClipboard(text){
+  try{
+    if(navigator.clipboard && window.isSecureContext){ await navigator.clipboard.writeText(text); }
+    else{
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      document.execCommand('copy'); ta.remove();
+    }
+    notifikasiToast('Tersalin ke clipboard.', 'success');
+  }catch(e){ notifikasiToast('Gagal menyalin ke clipboard.'); }
+}
+// Delegasi klik global untuk semua tombol salin — supaya tidak perlu wiring
+// listener manual di tiap tempat copyBtn() dipakai (tabel dirender ulang terus).
+document.addEventListener('click', (e)=>{
+  const btn = e.target.closest('.copy-btn');
+  if(btn) copyToClipboard(btn.dataset.copyText);
+});
+
+// --- Usulan #3: format tanggal & angka Indonesia yang konsisten di file
+// Excel hasil export — dipanggil otomatis oleh exportExcel()/exportExcelMultiSheet()
+// supaya nilai tanggal (ISO mentah) dan angka desimal (mentah/presisi mengambang)
+// diformat ulang sebelum masuk sheet, tanpa perlu mengubah tiap pemanggil export.
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+function formatNilaiUntukExcel(v){
+  if(v===null||v===undefined) return v;
+  if(typeof v === 'number'){
+    return Number.isInteger(v) ? v : Math.round(v*100)/100;
+  }
+  if(typeof v === 'string'){
+    if(ISO_DATETIME_RE.test(v)){
+      const dt = new Date(v);
+      if(!isNaN(dt)) return dt.toLocaleString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    } else if(ISO_DATE_RE.test(v)){
+      const dt = new Date(v+'T00:00:00');
+      if(!isNaN(dt)) return dt.toLocaleDateString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric'});
+    }
+  }
+  return v;
+}
+function formatBarisUntukExcel(rows){
+  return (rows||[]).map(row=>{
+    const out = {};
+    Object.keys(row).forEach(k=>{ out[k] = formatNilaiUntukExcel(row[k]); });
+    return out;
+  });
 }
 
 function isEditor(){ return state.profile && ['admin','kepala_bidang','petugas_lapangan'].includes(state.profile.role); }
@@ -273,7 +369,7 @@ function el(html){ const t=document.createElement('template'); t.innerHTML=html.
 function exportExcel(rows, filename='data', sheetName='Data'){
   try{
     if(!rows || !rows.length){ alert('Tidak ada data untuk diekspor.'); return; }
-    const ws = XLSX.utils.json_to_sheet(rows);
+    const ws = XLSX.utils.json_to_sheet(formatBarisUntukExcel(rows));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0,31));
     XLSX.writeFile(wb, `${filename}.xlsx`);
@@ -290,7 +386,7 @@ function exportExcelMultiSheet(sheets, filename='data'){
     if(!adaIsi){ alert('Tidak ada data untuk diekspor.'); return; }
     const wb = XLSX.utils.book_new();
     sheets.forEach(s=>{
-      const rows = (s.rows && s.rows.length)? s.rows : [{'Keterangan':'Tidak ada data'}];
+      const rows = (s.rows && s.rows.length)? formatBarisUntukExcel(s.rows) : [{'Keterangan':'Tidak ada data'}];
       const ws = XLSX.utils.json_to_sheet(rows);
       XLSX.utils.book_append_sheet(wb, ws, s.name.slice(0,31));
     });
@@ -1146,6 +1242,7 @@ const ICONS = {
   flag:'<path d="M5 3v18"/><path d="M5 4h11l-2.5 3.5L16 11H5"/>',
   image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M21 16l-5.5-5.5L4 21"/>',
   clipboard:'<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1Z"/><path d="M8.5 11h7M8.5 14.5h7M8.5 18h4"/>',
+  copy:'<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
   bell:'<path d="M6 8a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6Z"/><path d="M10 21a2 2 0 0 0 4 0"/>',
   wifioff:'<path d="M2 4l20 16"/><path d="M8.5 16.5a5 5 0 0 1 5.6-1"/><path d="M5 12.5a10 10 0 0 1 3.5-2.3"/><path d="M12 20h.01"/><path d="M16.8 13.5A10 10 0 0 1 19 12"/><path d="M19.5 8.7A15 15 0 0 1 22 10"/><path d="M2 9a15 15 0 0 1 4-2.5"/>',
   menu:'<path d="M3 6h18M3 12h18M3 18h18"/>',
@@ -1268,6 +1365,18 @@ function renderShell(){
 }
 
 // --- NOTIFIKASI: penugasan survei lewat tenggat, kegiatan lewat target, dokumen kurang ---
+// Usulan #5: setiap notifikasi bisa "Sembunyikan untuk sesi ini" — disimpan di
+// sessionStorage browser (bukan database), supaya badge tidak terus menumpuk
+// untuk item yang sudah dilihat/ditindaklanjuti, tapi tetap muncul lagi di sesi berikutnya.
+const NOTIF_HIDDEN_KEY = 'sijalan_notif_hidden_sesi';
+function getNotifHiddenSet(){
+  try{ return new Set(JSON.parse(sessionStorage.getItem(NOTIF_HIDDEN_KEY) || '[]')); }
+  catch(e){ return new Set(); }
+}
+function hideNotifUntukSesiIni(key){
+  const s = getNotifHiddenSet(); s.add(key);
+  try{ sessionStorage.setItem(NOTIF_HIDDEN_KEY, JSON.stringify([...s])); }catch(e){}
+}
 async function wireNotifBell(){
   const btn = document.getElementById('btn-notif');
   const panel = document.getElementById('notif-panel');
@@ -1279,47 +1388,71 @@ async function wireNotifBell(){
   if(hasil[1].status==='fulfilled') kegiatanOverdue = hasil[1].value; else console.error('[notif] gagal memuat kegiatan overdue:', hasil[1].reason);
   if(hasil[2].status==='fulfilled') dokumenKurang = hasil[2].value; else console.error('[notif] gagal memuat kegiatan dokumen kurang:', hasil[2].reason);
 
-  const totalCount = overdue.length + kegiatanOverdue.length + dokumenKurang.length;
-  if(totalCount){ countEl.textContent = totalCount > 99 ? '99+' : totalCount; countEl.classList.remove('hidden'); }
+  function renderPanel(){
+    const hidden = getNotifHiddenSet();
+    const overdueTampil = overdue.filter(o=>!hidden.has(`penugasan:${o.id}`));
+    const kegiatanTampil = kegiatanOverdue.filter(k=>!hidden.has(`kegiatan:${k.penanganan_id}`));
+    const dokumenTampil = dokumenKurang.filter(d=>!hidden.has(`dokumen:${d.penanganan_id}`));
+    const totalCount = overdueTampil.length + kegiatanTampil.length + dokumenTampil.length;
+    if(totalCount){ countEl.textContent = totalCount > 99 ? '99+' : totalCount; countEl.classList.remove('hidden'); }
+    else { countEl.classList.add('hidden'); }
 
-  function notifSection(title, items, goto, renderItem){
-    if(!items.length) return '';
-    return `<div data-notif-goto="${goto}" class="cursor-pointer">
-      <div class="px-3 pt-3 pb-1.5 font-display font-bold text-[12.5px] text-ink-500 uppercase tracking-wide">${title} (${items.length})</div>
-      ${items.map(renderItem).join('')}
-    </div>`;
+    function hideBtn(key){
+      return `<button type="button" data-notif-hide="${key}" class="text-[11px] text-ink-400 hover:text-[var(--bad)] mt-1" onclick="event.stopPropagation()">Sembunyikan untuk sesi ini</button>`;
+    }
+    function notifSection(title, items, goto, renderItem){
+      if(!items.length) return '';
+      return `<div>
+        <div data-notif-goto="${goto}" class="cursor-pointer px-3 pt-3 pb-1.5 font-display font-bold text-[12.5px] text-ink-500 uppercase tracking-wide">${title} (${items.length})</div>
+        ${items.map(renderItem).join('')}
+      </div>`;
+    }
+
+    const sections = [
+      notifSection('Penugasan Survei Lewat Tenggat', overdueTampil, 'penugasan', o=>`
+        <div class="px-3 py-2.5 border-b border-line hover:bg-[#F8FAFD]">
+          <div data-notif-goto="penugasan" class="cursor-pointer">
+            <div class="font-semibold text-[13px]">${o.kode_ruas} — ${o.nama_ruas}</div>
+            <div class="text-[12px] text-ink-500 mt-0.5">Petugas: ${o.nama_petugas} · Target: ${fmtDate(o.target_tanggal)}</div>
+            <div class="text-[11.5px] text-[var(--bad)] mt-0.5 font-medium capitalize">${PENUGASAN_STATUS_LABEL[o.status]||o.status}</div>
+          </div>
+          ${hideBtn(`penugasan:${o.id}`)}
+        </div>`),
+      notifSection('Kegiatan Penanganan Lewat Target', kegiatanTampil, 'kegiatan', k=>`
+        <div class="px-3 py-2.5 border-b border-line hover:bg-[#F8FAFD]">
+          <div data-notif-goto="kegiatan" class="cursor-pointer">
+            <div class="font-semibold text-[13px]">${k.kode_ruas} — ${k.nama_ruas}</div>
+            <div class="text-[12px] text-ink-500 mt-0.5">${(JENIS_PENANGANAN_OPT.find(([v])=>v===k.jenis_penanganan)||[,k.jenis_penanganan])[1]} · Target selesai: ${fmtDate(k.tanggal_selesai)}</div>
+            <div class="text-[11.5px] text-[var(--bad)] mt-0.5 font-medium capitalize">${(STATUS_PEKERJAAN_OPT.find(([v])=>v===k.status_pekerjaan)||[,k.status_pekerjaan])[1]}</div>
+          </div>
+          ${hideBtn(`kegiatan:${k.penanganan_id}`)}
+        </div>`),
+      notifSection('Dokumen Kegiatan Belum Lengkap', dokumenTampil, 'dokumen', d=>`
+        <div class="px-3 py-2.5 border-b border-line hover:bg-[#F8FAFD]">
+          <div data-notif-goto="dokumen" class="cursor-pointer">
+            <div class="font-semibold text-[13px]">${d.kode_ruas} — ${d.nama_ruas}</div>
+            <div class="text-[12px] text-ink-500 mt-0.5">${(JENIS_PENANGANAN_OPT.find(([v])=>v===d.jenis_penanganan)||[,d.jenis_penanganan])[1]} · Selesai fisik: ${fmtDate(d.tanggal_selesai)}</div>
+            <div class="text-[11.5px] text-[var(--bad)] mt-0.5 font-medium">${d.jumlah_dokumen_kurang} dokumen wajib belum lengkap</div>
+          </div>
+          ${hideBtn(`dokumen:${d.penanganan_id}`)}
+        </div>`),
+    ].join('');
+
+    panel.innerHTML = totalCount ? sections : `<div class="p-6 text-center text-ink-400 text-[12.5px]">Tidak ada notifikasi tertunda. 👍</div>`;
+    panel.querySelectorAll('[data-notif-goto]').forEach(sec=>{
+      sec.addEventListener('click', ()=>{ state.route = sec.dataset.notifGoto; renderShell(); routeView(); });
+    });
+    panel.querySelectorAll('[data-notif-hide]').forEach(b=>{
+      b.addEventListener('click', ()=>{ hideNotifUntukSesiIni(b.dataset.notifHide); renderPanel(); });
+    });
   }
 
-  const sections = [
-    notifSection('Penugasan Survei Lewat Tenggat', overdue, 'penugasan', o=>`
-      <div class="px-3 py-2.5 border-b border-line hover:bg-[#F8FAFD]">
-        <div class="font-semibold text-[13px]">${o.kode_ruas} — ${o.nama_ruas}</div>
-        <div class="text-[12px] text-ink-500 mt-0.5">Petugas: ${o.nama_petugas} · Target: ${fmtDate(o.target_tanggal)}</div>
-        <div class="text-[11.5px] text-[var(--bad)] mt-0.5 font-medium capitalize">${PENUGASAN_STATUS_LABEL[o.status]||o.status}</div>
-      </div>`),
-    notifSection('Kegiatan Penanganan Lewat Target', kegiatanOverdue, 'kegiatan', k=>`
-      <div class="px-3 py-2.5 border-b border-line hover:bg-[#F8FAFD]">
-        <div class="font-semibold text-[13px]">${k.kode_ruas} — ${k.nama_ruas}</div>
-        <div class="text-[12px] text-ink-500 mt-0.5">${(JENIS_PENANGANAN_OPT.find(([v])=>v===k.jenis_penanganan)||[,k.jenis_penanganan])[1]} · Target selesai: ${fmtDate(k.tanggal_selesai)}</div>
-        <div class="text-[11.5px] text-[var(--bad)] mt-0.5 font-medium capitalize">${(STATUS_PEKERJAAN_OPT.find(([v])=>v===k.status_pekerjaan)||[,k.status_pekerjaan])[1]}</div>
-      </div>`),
-    notifSection('Dokumen Kegiatan Belum Lengkap', dokumenKurang, 'dokumen', d=>`
-      <div class="px-3 py-2.5 border-b border-line hover:bg-[#F8FAFD]">
-        <div class="font-semibold text-[13px]">${d.kode_ruas} — ${d.nama_ruas}</div>
-        <div class="text-[12px] text-ink-500 mt-0.5">${(JENIS_PENANGANAN_OPT.find(([v])=>v===d.jenis_penanganan)||[,d.jenis_penanganan])[1]} · Selesai fisik: ${fmtDate(d.tanggal_selesai)}</div>
-        <div class="text-[11.5px] text-[var(--bad)] mt-0.5 font-medium">${d.jumlah_dokumen_kurang} dokumen wajib belum lengkap</div>
-      </div>`),
-  ].join('');
-
-  panel.innerHTML = totalCount ? sections : `<div class="p-6 text-center text-ink-400 text-[12.5px]">Tidak ada notifikasi tertunda. 👍</div>`;
+  renderPanel();
   btn.addEventListener('click', (e)=>{
     e.stopPropagation();
     panel.classList.toggle('hidden');
   });
   document.addEventListener('click', (e)=>{ if(!panel.contains(e.target) && e.target!==btn){ panel.classList.add('hidden'); } }, {once:true});
-  panel.querySelectorAll('[data-notif-goto]').forEach(sec=>{
-    sec.addEventListener('click', ()=>{ state.route = sec.dataset.notifGoto; renderShell(); routeView(); });
-  });
 }
 
 function routeView(){
@@ -2119,6 +2252,7 @@ async function viewRuas(){
       <select id="f-status" class="max-w-[180px]"><option value="">Semua Status</option><option value="nasional">Nasional</option><option value="provinsi">Provinsi</option><option value="kabupaten">Kabupaten</option></select>
       <select id="f-fungsi" class="max-w-[180px]"><option value="">Semua Fungsi</option><option value="arteri">Arteri</option><option value="kolektor">Kolektor</option><option value="lokal">Lokal</option></select>
       <select id="f-kondisi" class="max-w-[180px]"><option value="">Semua Kondisi</option>${KONDISI_ORDER.map(k=>`<option value="${k}">${KONDISI_LABEL[k]}</option>`).join('')}</select>
+      <button id="f-reset" type="button" class="btn-ghost !py-1.5 !px-3 text-[12.5px]">Reset Filter</button>
     </div>
     <!-- Pengembangan #9: export gabungan (ruas + kegiatan penanganan + anggaran)
          untuk satu kabupaten sekaligus, berguna untuk laporan ke kabupaten. -->
@@ -2161,7 +2295,7 @@ async function viewRuas(){
       const tbody = document.getElementById('ruas-tbody');
       tbody.innerHTML = rows.map(r=>`
         <tr class="row-hover" data-id="${r.id}">
-          <td class="font-mono text-[12.5px] text-navy-700 font-semibold">${r.kode_ruas}</td>
+          <td class="font-mono text-[12.5px] text-navy-700 font-semibold"><div class="flex items-center gap-1.5">${r.kode_ruas}${copyBtn(r.kode_ruas,'Salin kode ruas')}</div></td>
           <td class="font-medium">${r.nama_ruas}</td>
           <td class="text-ink-500">${r.kabupaten?.nama || '—'}</td>
           <td class="capitalize text-ink-500">${r.status_jalan||'—'}</td>
@@ -2170,8 +2304,8 @@ async function viewRuas(){
           <td class="font-mono">${r.lebar_jalan_m!=null? fmtNum(r.lebar_jalan_m,1)+' m' : '—'}</td>
           <td class="font-mono text-[11.5px]">
             <div class="flex items-center gap-2.5">
-              ${(r.lat_awal!=null && r.long_awal!=null)? `<a href="https://www.google.com/maps?q=${r.lat_awal},${r.long_awal}" target="_blank" title="Titik Awal: ${fmtNum(r.lat_awal,6)}, ${fmtNum(r.long_awal,6)}" class="text-emerald-600 hover:text-emerald-700" onclick="event.stopPropagation()">${icon('pin','w-4 h-4')}</a>` : ''}
-              ${(r.lat_akhir!=null && r.long_akhir!=null)? `<a href="https://www.google.com/maps?q=${r.lat_akhir},${r.long_akhir}" target="_blank" title="Titik Akhir: ${fmtNum(r.lat_akhir,6)}, ${fmtNum(r.long_akhir,6)}" class="text-rose-600 hover:text-rose-700" onclick="event.stopPropagation()">${icon('flag','w-4 h-4')}</a>` : ''}
+              ${(r.lat_awal!=null && r.long_awal!=null)? `<a href="https://www.google.com/maps?q=${r.lat_awal},${r.long_awal}" target="_blank" title="Titik Awal: ${fmtNum(r.lat_awal,6)}, ${fmtNum(r.long_awal,6)}" class="text-emerald-600 hover:text-emerald-700" onclick="event.stopPropagation()">${icon('pin','w-4 h-4')}</a>${copyBtn(`${r.lat_awal},${r.long_awal}`,'Salin koordinat titik awal')}` : ''}
+              ${(r.lat_akhir!=null && r.long_akhir!=null)? `<a href="https://www.google.com/maps?q=${r.lat_akhir},${r.long_akhir}" target="_blank" title="Titik Akhir: ${fmtNum(r.lat_akhir,6)}, ${fmtNum(r.long_akhir,6)}" class="text-rose-600 hover:text-rose-700" onclick="event.stopPropagation()">${icon('flag','w-4 h-4')}</a>${copyBtn(`${r.lat_akhir},${r.long_akhir}`,'Salin koordinat titik akhir')}` : ''}
               ${(r.lat_awal==null && r.lat_akhir==null)? '<span class="text-ink-400">—</span>' : ''}
             </div>
           </td>
@@ -2191,8 +2325,15 @@ async function viewRuas(){
         });
       });
     }
-    ['f-search','f-kabupaten','f-status','f-fungsi','f-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    document.getElementById('f-search').addEventListener('input', debounce(renderRows, 300));
+    ['f-kabupaten','f-status','f-fungsi','f-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
     document.getElementById('f-kabupaten').addEventListener('input', toggleKabExportBox);
+    document.getElementById('f-reset').addEventListener('click', ()=>{
+      document.getElementById('f-search').value='';
+      ['f-kabupaten','f-status','f-fungsi','f-kondisi'].forEach(id=>document.getElementById(id).value='');
+      toggleKabExportBox();
+      renderRows();
+    });
     toggleKabExportBox();
     renderRows();
     if(isEditor()){ document.getElementById('btn-add-ruas').addEventListener('click', ()=>openRuasFormModal(kabupaten)); }
@@ -2213,7 +2354,7 @@ async function viewRuasDetail(id){
     <button id="back-ruas" class="btn-ghost !py-1.5 !px-3 text-[12.5px] mb-4">← Kembali ke daftar ruas</button>
     <div class="flex items-start justify-between flex-wrap gap-3 mb-6">
       <div>
-        <span class="font-mono text-navy-700 font-bold text-[13px]">${ruas.kode_ruas}</span>
+        <div class="flex items-center gap-1.5"><span class="font-mono text-navy-700 font-bold text-[13px]">${ruas.kode_ruas}</span>${copyBtn(ruas.kode_ruas,'Salin kode ruas')}</div>
         <h1 class="font-display font-extrabold text-2xl text-ink-900 mt-0.5">${ruas.nama_ruas}</h1>
         <p class="text-ink-500 text-[13.5px] mt-1">${ruas.kabupaten?.nama||'—'} · <span class="capitalize">${ruas.status_jalan||'—'}</span> · ${ruas.fungsi_jalan? 'Fungsi '+ruas.fungsi_jalan : ''} · ${fmtNum(ruas.panjang_km,1)} km${ruas.lebar_jalan_m!=null? ' · Lebar '+fmtNum(ruas.lebar_jalan_m,1)+' m' : ''}</p>
       </div>
@@ -2321,8 +2462,8 @@ async function viewRuasDetail(id){
         ${(ruas.lat_awal||ruas.lat_akhir)? `<div class="card p-5">
           <h3 class="font-display font-bold text-[15px] mb-3">Koordinat GPS</h3>
           <div class="space-y-2 text-[13px]">
-            ${ruas.lat_awal&&ruas.long_awal? `<div class="flex items-center justify-between"><div><span class="text-ink-400">Titik Awal</span><div class="font-mono">${fmtNum(ruas.lat_awal,6)}, ${fmtNum(ruas.long_awal,6)}</div></div><a href="https://www.google.com/maps?q=${ruas.lat_awal},${ruas.long_awal}" target="_blank" class="text-navy-700 text-[12px] underline shrink-0">Buka Peta</a></div>`:''}
-            ${ruas.lat_akhir&&ruas.long_akhir? `<div class="flex items-center justify-between"><div><span class="text-ink-400">Titik Akhir</span><div class="font-mono">${fmtNum(ruas.lat_akhir,6)}, ${fmtNum(ruas.long_akhir,6)}</div></div><a href="https://www.google.com/maps?q=${ruas.lat_akhir},${ruas.long_akhir}" target="_blank" class="text-navy-700 text-[12px] underline shrink-0">Buka Peta</a></div>`:''}
+            ${ruas.lat_awal&&ruas.long_awal? `<div class="flex items-center justify-between"><div><span class="text-ink-400">Titik Awal</span><div class="font-mono flex items-center gap-1.5">${fmtNum(ruas.lat_awal,6)}, ${fmtNum(ruas.long_awal,6)}${copyBtn(`${ruas.lat_awal},${ruas.long_awal}`,'Salin koordinat titik awal')}</div></div><a href="https://www.google.com/maps?q=${ruas.lat_awal},${ruas.long_awal}" target="_blank" class="text-navy-700 text-[12px] underline shrink-0">Buka Peta</a></div>`:''}
+            ${ruas.lat_akhir&&ruas.long_akhir? `<div class="flex items-center justify-between"><div><span class="text-ink-400">Titik Akhir</span><div class="font-mono flex items-center gap-1.5">${fmtNum(ruas.lat_akhir,6)}, ${fmtNum(ruas.long_akhir,6)}${copyBtn(`${ruas.lat_akhir},${ruas.long_akhir}`,'Salin koordinat titik akhir')}</div></div><a href="https://www.google.com/maps?q=${ruas.lat_akhir},${ruas.long_akhir}" target="_blank" class="text-navy-700 text-[12px] underline shrink-0">Buka Peta</a></div>`:''}
           </div>
         </div>`:''}
         ${ruas.keterangan? `<div class="card p-5"><h3 class="font-display font-bold text-[15px] mb-2">Keterangan</h3><p class="text-[13px] text-ink-600">${ruas.keterangan}</p></div>`:''}
@@ -3126,7 +3267,7 @@ async function viewKegiatan(){
         return `
         <tr class="row-hover ${lewat?'row-lewat-tenggat':''}" data-id="${k.id}">
           <td>${fotoThumbHtml(k.foto_awal_path || k.foto_akhir_path)}</td>
-          <td><span class="font-mono text-[12px] text-navy-700 font-semibold">${k.kode_ruas}</span><div class="text-[12.5px]">${k.nama_ruas}</div></td>
+          <td><div class="flex items-center gap-1.5"><span class="font-mono text-[12px] text-navy-700 font-semibold">${k.kode_ruas}</span>${copyBtn(k.kode_ruas,'Salin kode ruas')}</div><div class="text-[12.5px]">${k.nama_ruas}</div></td>
           <td class="capitalize">${(k.jenis_penanganan||'—').replaceAll('_',' ')}${k.kejadian_bencana_id?` <span class="text-[var(--bad)]" title="Menangani kejadian bencana: ${(k.bencana_jenis_kejadian||'—').replaceAll('_',' ')} · ${fmtDate(k.bencana_tanggal_kejadian)}">⚠</span>`:''}</td>
           <td class="text-ink-500 text-[12.5px] max-w-[220px] truncate">${k.sub_kegiatan||'—'}</td>
           <td class="font-mono text-[12.5px]">${fmtDate(k.tanggal_penanganan)}</td>
@@ -3154,7 +3295,8 @@ async function viewKegiatan(){
         });
       });
     }
-    ['fk-search','fk-kabupaten','fk-jenis','fk-status','fk-sumber','fk-tgl-dari','fk-tgl-sampai'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    document.getElementById('fk-search').addEventListener('input', debounce(renderRows, 300));
+    ['fk-kabupaten','fk-jenis','fk-status','fk-sumber','fk-tgl-dari','fk-tgl-sampai'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
     document.getElementById('fk-reset').addEventListener('click', ()=>{
       ['fk-search','fk-kabupaten','fk-jenis','fk-status','fk-sumber','fk-tgl-dari','fk-tgl-sampai'].forEach(id=>document.getElementById(id).value='');
       renderRows();
@@ -3292,6 +3434,7 @@ async function viewAnggaran(){
     <div class="flex flex-wrap gap-3 mb-4">
       <select id="fa-tahun" class="max-w-[140px]"><option value="">Semua Tahun</option>${tahunOpt.map(t=>`<option value="${t}">${t}</option>`).join('')}</select>
       <select id="fa-sumber" class="max-w-[190px]"><option value="">Semua Sumber Dana</option>${SUMBER_DANA_OPT.map(([vv,l])=>`<option value="${vv}">${l}</option>`).join('')}</select>
+      <button id="fa-reset" type="button" class="btn-ghost !py-1.5 !px-3 text-[12.5px]">Reset Filter</button>
     </div>
     <div class="card overflow-x-auto mb-5">
       <table><thead><tr><th>Tahun</th><th>Sumber Dana</th><th>Pagu</th><th>Realisasi</th><th>% Realisasi</th></tr></thead>
@@ -3338,6 +3481,10 @@ async function viewAnggaran(){
     }
     ['fa-tahun','fa-sumber'].forEach(id=>document.getElementById(id).addEventListener('input', renderTahunRows));
     ['fa-tahun','fa-kab'].forEach(id=>document.getElementById(id).addEventListener('input', renderKabRows));
+    document.getElementById('fa-reset').addEventListener('click', ()=>{
+      document.getElementById('fa-tahun').value=''; document.getElementById('fa-sumber').value=''; document.getElementById('fa-kab').value='';
+      renderTahunRows(); renderKabRows();
+    });
     renderTahunRows(); renderKabRows();
 
     document.getElementById('anggaran-export').innerHTML = exportButtons();
@@ -3372,6 +3519,7 @@ async function viewPenugasan(){
       <input id="pn-search" placeholder="Cari ruas / nama staf…" class="max-w-xs">
       <select id="pn-status" class="max-w-[200px]"><option value="">Semua Status</option>${Object.keys(PENUGASAN_STATUS_LABEL).map(s=>`<option value="${s}">${PENUGASAN_STATUS_LABEL[s]}</option>`).join('')}</select>
       ${!isPenugas()?`<label class="flex items-center gap-2 text-[12.5px] text-ink-600"><input id="pn-mine" type="checkbox" class="!w-auto">Hanya tugas saya</label>`:''}
+      <button id="pn-reset" type="button" class="btn-ghost !py-1.5 !px-3 text-[12.5px]">Reset Filter</button>
     </div>
     <div class="card overflow-x-auto">
       <table><thead><tr><th>Ruas</th><th>Kab/Kota</th><th>Staf</th><th>Target</th><th>Status</th><th>Catatan</th>${isPenugas()?'<th>Aksi</th>':''}</tr></thead>
@@ -3396,7 +3544,7 @@ async function viewPenugasan(){
         const lewat = isLewatTenggat(p.target_tanggal, p.status);
         return `
         <tr data-id="${p.id}" class="${lewat?'row-lewat-tenggat':''}">
-          <td class="font-medium">${p.kode_ruas? `<span class="font-mono text-[12px] text-navy-700 font-semibold">${p.kode_ruas}</span> · `:''}${p.nama_ruas}</td>
+          <td class="font-medium">${p.kode_ruas? `<span class="inline-flex items-center gap-1"><span class="font-mono text-[12px] text-navy-700 font-semibold">${p.kode_ruas}</span>${copyBtn(p.kode_ruas,'Salin kode ruas')}</span> · `:''}${p.nama_ruas}</td>
           <td class="text-ink-500">${p.kabupaten||'—'}</td>
           <td>${p.nama_petugas}</td>
           <td class="font-mono text-[12.5px]">${p.target_tanggal? fmtDate(p.target_tanggal) : '—'}${lewat?` <span class="text-[var(--bad)]" title="Sudah lewat tenggat">⚠</span>`:''}</td>
@@ -3425,8 +3573,14 @@ async function viewPenugasan(){
         try{ await api.deletePenugasan(id); viewPenugasan(); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
       }));
     }
-    ['pn-search','pn-status'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    document.getElementById('pn-search').addEventListener('input', debounce(renderRows, 300));
+    document.getElementById('pn-status').addEventListener('input', renderRows);
     document.getElementById('pn-mine')?.addEventListener('change', renderRows);
+    document.getElementById('pn-reset').addEventListener('click', ()=>{
+      document.getElementById('pn-search').value=''; document.getElementById('pn-status').value='';
+      const mineEl = document.getElementById('pn-mine'); if(mineEl) mineEl.checked=false;
+      renderRows();
+    });
     renderRows();
     if(isPenugas()){ document.getElementById('btn-add-penugasan').addEventListener('click', ()=>openPenugasanFormModal(ruas, staf, null, ()=>viewPenugasan())); }
   }catch(err){ v.innerHTML = errorPanel(err); }
@@ -3582,6 +3736,7 @@ async function renderJembatanTab(){
       <div class="flex flex-wrap gap-3">
         <input id="fj-search" placeholder="Cari nama jembatan / ruas…" class="max-w-xs">
         <select id="fj-kondisi" class="max-w-[180px]"><option value="">Semua Kondisi</option>${KONDISI_ORDER.map(k=>`<option value="${k}">${KONDISI_LABEL[k]}</option>`).join('')}</select>
+        <button id="fj-reset" type="button" class="btn-ghost !py-1.5 !px-3 text-[12.5px]">Reset Filter</button>
       </div>
       ${isEditor()?`<button id="btn-add-jembatan" class="btn-accent">+ Tambah Jembatan</button>`:''}
     </div>
@@ -3624,7 +3779,12 @@ async function renderJembatanTab(){
         });
       });
     }
-    ['fj-search','fj-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    document.getElementById('fj-search').addEventListener('input', debounce(renderRows, 300));
+    document.getElementById('fj-kondisi').addEventListener('input', renderRows);
+    document.getElementById('fj-reset').addEventListener('click', ()=>{
+      document.getElementById('fj-search').value=''; document.getElementById('fj-kondisi').value='';
+      renderRows();
+    });
     renderRows();
     if(isEditor()){ document.getElementById('btn-add-jembatan').addEventListener('click', ()=>openJembatanFormModal(ruas, null, renderJembatanTab)); }
   }catch(err){ box.innerHTML = errorPanel(err); }
@@ -3697,6 +3857,7 @@ async function renderDrainaseTab(){
         <input id="fd-search" placeholder="Cari ruas / segmen…" class="max-w-xs">
         <select id="fd-jenis" class="max-w-[190px]"><option value="">Semua Jenis</option>${jenisOpt.map(j=>`<option value="${j}">${j.replaceAll('_',' ')}</option>`).join('')}</select>
         <select id="fd-kondisi" class="max-w-[180px]"><option value="">Semua Kondisi</option>${KONDISI_ORDER.map(k=>`<option value="${k}">${KONDISI_LABEL[k]}</option>`).join('')}</select>
+        <button id="fd-reset" type="button" class="btn-ghost !py-1.5 !px-3 text-[12.5px]">Reset Filter</button>
       </div>
       ${isEditor()?`<button id="btn-add-drainase" class="btn-accent">+ Tambah Drainase</button>`:''}
     </div>
@@ -3741,7 +3902,12 @@ async function renderDrainaseTab(){
         });
       });
     }
-    ['fd-search','fd-jenis','fd-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    document.getElementById('fd-search').addEventListener('input', debounce(renderRows, 300));
+    ['fd-jenis','fd-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    document.getElementById('fd-reset').addEventListener('click', ()=>{
+      document.getElementById('fd-search').value=''; document.getElementById('fd-jenis').value=''; document.getElementById('fd-kondisi').value='';
+      renderRows();
+    });
     renderRows();
     if(isEditor()){ document.getElementById('btn-add-drainase').addEventListener('click', ()=>openDrainaseFormModal(ruas, null, renderDrainaseTab)); }
   }catch(err){ box.innerHTML = errorPanel(err); }
@@ -3830,6 +3996,7 @@ async function renderPerlengkapanTab(){
         <input id="fp-search" placeholder="Cari ruas / segmen…" class="max-w-xs">
         <select id="fp-jenis" class="max-w-[190px]"><option value="">Semua Jenis</option>${jenisOpt.map(j=>`<option value="${j}">${j.replaceAll('_',' ')}</option>`).join('')}</select>
         <select id="fp-kondisi" class="max-w-[180px]"><option value="">Semua Kondisi</option>${KONDISI_ORDER.map(k=>`<option value="${k}">${KONDISI_LABEL[k]}</option>`).join('')}</select>
+        <button id="fp-reset" type="button" class="btn-ghost !py-1.5 !px-3 text-[12.5px]">Reset Filter</button>
       </div>
       ${isEditor()?`<button id="btn-add-perlengkapan" class="btn-accent">+ Tambah Perlengkapan</button>`:''}
     </div>
@@ -3873,7 +4040,12 @@ async function renderPerlengkapanTab(){
         });
       });
     }
-    ['fp-search','fp-jenis','fp-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    document.getElementById('fp-search').addEventListener('input', debounce(renderRows, 300));
+    ['fp-jenis','fp-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    document.getElementById('fp-reset').addEventListener('click', ()=>{
+      document.getElementById('fp-search').value=''; document.getElementById('fp-jenis').value=''; document.getElementById('fp-kondisi').value='';
+      renderRows();
+    });
     renderRows();
     if(isEditor()){ document.getElementById('btn-add-perlengkapan').addEventListener('click', ()=>openPerlengkapanFormModal(ruas, null, renderPerlengkapanTab)); }
   }catch(err){ box.innerHTML = errorPanel(err); }
@@ -3956,6 +4128,7 @@ async function renderLalulintasTab(){
       <div class="flex flex-wrap gap-3">
         <input id="fl-search" placeholder="Cari ruas / segmen…" class="max-w-xs">
         <select id="fl-tahun" class="max-w-[140px]"><option value="">Semua Tahun</option>${tahunOpt.map(t=>`<option value="${t}">${t}</option>`).join('')}</select>
+        <button id="fl-reset" type="button" class="btn-ghost !py-1.5 !px-3 text-[12.5px]">Reset Filter</button>
       </div>
       <div class="flex items-center gap-2">
         <div id="lalin-export"></div>
@@ -4001,7 +4174,12 @@ async function renderLalulintasTab(){
         });
       });
     }
-    ['fl-search','fl-tahun'].forEach(id=>document.getElementById(id).addEventListener('input', renderRows));
+    document.getElementById('fl-search').addEventListener('input', debounce(renderRows, 300));
+    document.getElementById('fl-tahun').addEventListener('input', renderRows);
+    document.getElementById('fl-reset').addEventListener('click', ()=>{
+      document.getElementById('fl-search').value=''; document.getElementById('fl-tahun').value='';
+      renderRows();
+    });
     renderRows();
 
     document.getElementById('lalin-export').innerHTML = exportButtons();
