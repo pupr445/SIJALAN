@@ -341,6 +341,84 @@ function setupColPicker(tableKey, columns, pageState, onRowsPerPageChange){
   return apply;
 }
 
+// =====================================================================
+// PENGEMBANGAN TINGKAT 2 — Item #2: Preset filter tersimpan.
+// Disimpan per pengguna di localStorage (per modul/tableKey), tidak
+// memengaruhi data bersama maupun pengguna lain.
+// =====================================================================
+function getFilterPresets(moduleKey){
+  try{ return JSON.parse(localStorage.getItem('sijalan_filter_presets_'+moduleKey) || '[]'); }
+  catch(e){ return []; }
+}
+function simpanFilterPresets(moduleKey, list){
+  try{ localStorage.setItem('sijalan_filter_presets_'+moduleKey, JSON.stringify(list)); }catch(e){}
+}
+// Modal kecil untuk meminta nama preset (menggantikan prompt() bawaan browser
+// supaya konsisten dengan pola UI lain di aplikasi ini).
+function mintaNamaPreset(defaultNama=''){
+  return new Promise((resolve)=>{
+    const overlay = openModal(`
+      <h3 class="font-display font-extrabold text-lg mb-1">Simpan Preset Filter</h3>
+      <p class="text-[13px] text-ink-500 mb-4">Beri nama untuk kombinasi filter saat ini, supaya bisa dipanggil kembali nanti.</p>
+      <input id="preset-nama-input" placeholder="mis. Kabupaten Kupang · Rusak Berat" value="${defaultNama}" class="mb-4">
+      <div class="flex justify-end gap-2">
+        <button type="button" data-preset-batal class="btn-ghost">Batal</button>
+        <button type="button" data-preset-simpan class="btn-accent">Simpan</button>
+      </div>`);
+    const input = overlay.querySelector('#preset-nama-input');
+    input.focus(); input.select();
+    function selesai(val){ overlay.remove(); resolve(val); }
+    overlay.querySelector('[data-preset-batal]').addEventListener('click', ()=>selesai(null));
+    overlay.querySelector('[data-preset-simpan]').addEventListener('click', ()=>selesai(input.value.trim() || null));
+    input.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); selesai(input.value.trim() || null); } if(e.key==='Escape') selesai(null); });
+  });
+}
+// Pasang UI dropdown "Preset Filter" pada sebuah elemen wadah (container).
+// getFilters() -> object filter saat ini yang mau disimpan.
+// applyFilters(filterObj) -> menerapkan kembali filter yang dipanggil dari preset.
+function wireFilterPresets(container, moduleKey, getFilters, applyFilters){
+  container.innerHTML = `<div class="col-picker-wrap no-print">
+    <button type="button" id="fp-btn-${moduleKey}" class="btn-ghost !py-1.5 !px-3 text-[12.5px] flex items-center gap-1.5">${icon('bookmark','w-3.5 h-3.5')}Preset Filter</button>
+    <div id="fp-panel-${moduleKey}" class="col-picker-panel hidden" style="width:260px"></div>
+  </div>`;
+  const btn = container.querySelector('#fp-btn-'+moduleKey);
+  const panel = container.querySelector('#fp-panel-'+moduleKey);
+  function renderPanel(){
+    const list = getFilterPresets(moduleKey);
+    panel.innerHTML = `<div class="cp-title">Preset Tersimpan</div>` +
+      (list.length? list.map((p,i)=>`
+        <div class="flex items-center gap-1 group">
+          <button type="button" data-fp-load="${i}" class="flex-1 text-left px-2 py-1.5 rounded-md text-[12.5px] font-medium text-ink-700 hover:bg-[#F0F4FA] truncate">${p.nama}</button>
+          <button type="button" data-fp-del="${i}" title="Hapus preset" class="p-1 rounded text-ink-400 hover:text-[var(--bad)]">${icon('trash','w-3.5 h-3.5')}</button>
+        </div>`).join('') : `<div class="px-2 py-1.5 text-[12px] text-ink-400">Belum ada preset tersimpan.</div>`) +
+      `<div class="cp-divider"></div>
+      <button type="button" data-fp-save class="w-full flex items-center gap-1.5 justify-center btn-ghost !py-1.5 text-[12.5px]">${icon('plus','w-3.5 h-3.5')}Simpan Filter Saat Ini</button>`;
+    panel.querySelectorAll('[data-fp-load]').forEach(b=>b.addEventListener('click', ()=>{
+      const p = list[Number(b.dataset.fpLoad)];
+      if(p) applyFilters(p.filters);
+      panel.classList.add('hidden');
+    }));
+    panel.querySelectorAll('[data-fp-del]').forEach(b=>b.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const idx = Number(b.dataset.fpDel);
+      list.splice(idx,1);
+      simpanFilterPresets(moduleKey, list);
+      renderPanel();
+    }));
+    panel.querySelector('[data-fp-save]').addEventListener('click', async ()=>{
+      const nama = await mintaNamaPreset();
+      if(!nama) return;
+      const list2 = getFilterPresets(moduleKey);
+      list2.push({nama, filters: getFilters()});
+      simpanFilterPresets(moduleKey, list2);
+      renderPanel();
+    });
+  }
+  renderPanel();
+  btn.addEventListener('click', (e)=>{ e.stopPropagation(); panel.classList.toggle('hidden'); });
+  document.addEventListener('click', (e)=>{ if(!panel.contains(e.target) && e.target!==btn) panel.classList.add('hidden'); });
+}
+
 function baruDiubahSejakJam(row, jamBatas){
   jamBatas = jamBatas || 48;
   const ts = row && (row.updated_at || row.created_at);
@@ -743,7 +821,7 @@ function exportLaporanRuasPdf(ruas, segmen, kegiatan, survei, anggaran, bencana)
 // kegiatan penanganan + anggaran kabupaten tersebut, disatukan jadi satu dokumen.
 // Data yang dipakai sudah ada (ruas_jalan, v_kegiatan_penanganan, anggaran_tahunan),
 // hanya digabung tampilannya; tidak menambah tabel/kolom baru di database.
-function exportLaporanKabupatenPdf(kabNama, ruasKab, kegiatanKab, anggaranKab){
+function exportLaporanKabupatenPdf(kabNama, ruasKab, kegiatanKab, anggaranKab, jembatanKab=[], penugasanKab=[]){
   try{
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation:'portrait' });
@@ -818,6 +896,31 @@ function exportLaporanKabupatenPdf(kabNama, ruasKab, kegiatanKab, anggaranKab){
       })),
       'Belum ada data anggaran tercatat untuk kabupaten ini.');
 
+    // 4. Aset (jembatan) di kabupaten ini — Pengembangan Tingkat 2 · Item #4
+    sectionTitle(`Aset — Jembatan (${jembatanKab.length})`);
+    tableOrNote(
+      [{header:'Nama Jembatan',key:'nama'},{header:'Ruas',key:'ruas'},{header:'Panjang (m)',key:'panjang'},{header:'Kondisi',key:'kondisi'},{header:'Tahun',key:'tahun'}],
+      jembatanKab.map(j=>({
+        nama: j.nama_jembatan,
+        ruas: j.ruas_jalan?.kode_ruas || '—',
+        panjang: j.panjang_m!=null ? fmtNum(j.panjang_m,1) : '—',
+        kondisi: j.kondisi ? KONDISI_LABEL[j.kondisi] : '—',
+        tahun: j.tahun_dibangun || '—',
+      })),
+      'Belum ada data jembatan tercatat untuk kabupaten ini.');
+
+    // 5. Penugasan survei di kabupaten ini — Pengembangan Tingkat 2 · Item #4
+    sectionTitle(`Penugasan Survei (${penugasanKab.length})`);
+    tableOrNote(
+      [{header:'Ruas',key:'ruas'},{header:'Staf',key:'staf'},{header:'Target',key:'target'},{header:'Status',key:'status'}],
+      penugasanKab.map(p=>({
+        ruas: p.kode_ruas || '—',
+        staf: p.nama_petugas || '—',
+        target: p.target_tanggal ? fmtDate(p.target_tanggal) : '—',
+        status: PENUGASAN_STATUS_LABEL[p.status] || p.status,
+      })),
+      'Belum ada penugasan survei tercatat untuk kabupaten ini.');
+
     doc.save(`sijalan_gabungan_${kabNama.toString().toLowerCase().replaceAll(/[^a-z0-9]+/g,'_')}.pdf`);
   }catch(e){ console.error('[export-laporan-kabupaten] gagal:', e); alert('Gagal membuat laporan PDF: '+terjemahkanErrorDb(e)); }
 }
@@ -842,8 +945,17 @@ async function exportKabupatenGabungan(kabupatenId, kabupatenList, format){
   const kabNama = kab?.nama || 'Kabupaten';
   try{
     const ruasKab = (state.ruasCache||[]).filter(r=>r.kabupaten_id===kabupatenId);
-    const [kegiatanAll, anggaranKab] = await Promise.all([api.kegiatanList(), api.anggaranByKabupaten(kabupatenId)]);
+    const ruasKabIds = new Set(ruasKab.map(r=>r.id));
+    // Pengembangan Tingkat 2 — Item #4: perluas cakupan export gabungan agar
+    // juga mencakup modul Aset (jembatan) dan Penugasan Survei, dengan
+    // menggunakan kembali (reuse) fungsi ekspor Excel/PDF yang sudah ada —
+    // hanya menambah cakupan datanya, bukan menulis fungsi ekspor baru.
+    const [kegiatanAll, anggaranKab, jembatanAll, penugasanAll] = await Promise.all([
+      api.kegiatanList(), api.anggaranByKabupaten(kabupatenId), api.jembatanList().catch(()=>[]), api.penugasanList().catch(()=>[])
+    ]);
     const kegiatanKab = kegiatanAll.filter(k=>k.kabupaten_id===kabupatenId);
+    const jembatanKab = jembatanAll.filter(j=>ruasKabIds.has(j.ruas_id));
+    const penugasanKab = penugasanAll.filter(p=>p.kabupaten===kabNama);
     if(format==='excel'){
       exportExcelMultiSheet([
         { name:'Ruas Jalan', rows: ruasKab.map(r=>({
@@ -859,9 +971,18 @@ async function exportKabupatenGabungan(kabupatenId, kabupatenList, format){
             'Kode Ruas': a.ruas_jalan?.kode_ruas||'—', 'Nama Ruas': a.ruas_jalan?.nama_ruas||'—', 'Tahun': a.tahun,
             'Sumber Dana': (a.sumber_dana||'—').replaceAll('_',' '), 'Pagu': a.pagu, 'Realisasi': a.realisasi,
           })) },
+        { name:'Aset (Jembatan)', rows: jembatanKab.map(j=>({
+            'Nama Jembatan': j.nama_jembatan, 'Kode Ruas': j.ruas_jalan?.kode_ruas||'—', 'Nama Ruas': j.ruas_jalan?.nama_ruas||'—',
+            'Panjang (m)': j.panjang_m, 'Lebar (m)': j.lebar_m, 'Konstruksi': j.jenis_konstruksi||'—',
+            'Kondisi': j.kondisi? KONDISI_LABEL[j.kondisi] : '—', 'Tahun Dibangun': j.tahun_dibangun||'—',
+          })) },
+        { name:'Penugasan Survei', rows: penugasanKab.map(p=>({
+            'Kode Ruas': p.kode_ruas||'—', 'Nama Ruas': p.nama_ruas||'—', 'Staf': p.nama_petugas||'—',
+            'Target Tanggal': p.target_tanggal||'—', 'Status': PENUGASAN_STATUS_LABEL[p.status]||p.status, 'Catatan': p.catatan||'—',
+          })) },
       ], `sijalan_gabungan_${kabNama.toLowerCase().replaceAll(/[^a-z0-9]+/g,'_')}`);
     } else {
-      exportLaporanKabupatenPdf(kabNama, ruasKab, kegiatanKab, anggaranKab);
+      exportLaporanKabupatenPdf(kabNama, ruasKab, kegiatanKab, anggaranKab, jembatanKab, penugasanKab);
     }
   }catch(err){ console.error('[export-kabupaten-gabungan] gagal:', err); alert('Gagal membuat file export: '+terjemahkanErrorDb(err)); }
 }
@@ -1406,6 +1527,98 @@ const api = {
   // --- pengguna ---
   async profiles(){ const {data,error} = await sb.from('profiles').select('*, kabupaten(nama)').order('created_at'); if(error) throw error; return data; },
   async updateRole(id, role){ const {error} = await sb.from('profiles').update({role}).eq('id',id); if(error) throw error; },
+
+  // =====================================================================
+  // PENGEMBANGAN TINGKAT 2 — Item #1: Pencarian global lintas modul.
+  // Hanya membaca (select) dari tabel/view yang sudah ada, tidak ada
+  // perubahan tulis data. Tiap modul dibatasi jumlah hasilnya (limit)
+  // supaya ringan dipanggil setiap pengguna mengetik di kotak pencarian.
+  // =====================================================================
+  async globalSearch(q, limitPerModul=6){
+    // Sanitasi: koma & tanda kurung punya arti khusus dalam sintaks filter
+    // PostgREST (.or(...)), jadi dibuang dulu supaya pencarian tetap aman.
+    q = (q||'').replace(/[,()]/g, ' ').trim();
+    if(!q) return {ruas:[], kegiatan:[], jembatan:[], penugasan:[], bencana:[]};
+    const like = `%${q}%`;
+    const [ruasRes, kegiatanRes, jembatanRes, penugasanRes, bencanaRes] = await Promise.allSettled([
+      sb.from('ruas_jalan').select('id,kode_ruas,nama_ruas,kabupaten:kabupaten_id(nama)')
+        .or(`kode_ruas.ilike.${like},nama_ruas.ilike.${like}`).limit(limitPerModul),
+      sb.from('v_kegiatan_penanganan').select('penanganan_id,ruas_id,kode_ruas,nama_ruas,jenis_penanganan,tanggal_penanganan')
+        .or(`kode_ruas.ilike.${like},nama_ruas.ilike.${like},jenis_penanganan.ilike.${like}`).limit(limitPerModul),
+      sb.from('aset_jembatan').select('id,nama_jembatan,ruas_id,ruas_jalan(kode_ruas,nama_ruas)')
+        .ilike('nama_jembatan', like).limit(limitPerModul),
+      sb.from('v_penugasan_survei').select('id,kode_ruas,nama_ruas,nama_petugas,status,target_tanggal')
+        .or(`kode_ruas.ilike.${like},nama_ruas.ilike.${like},nama_petugas.ilike.${like}`).limit(limitPerModul),
+      sb.from('v_kejadian_bencana').select('id,kode_ruas,nama_ruas,jenis_kejadian,tanggal_kejadian')
+        .or(`kode_ruas.ilike.${like},nama_ruas.ilike.${like},jenis_kejadian.ilike.${like}`).limit(limitPerModul),
+    ]);
+    const pick = (r)=> r.status==='fulfilled' ? (r.value.data||[]) : [];
+    return {
+      ruas: pick(ruasRes),
+      kegiatan: pick(kegiatanRes),
+      jembatan: pick(jembatanRes),
+      penugasan: pick(penugasanRes),
+      bencana: pick(bencanaRes),
+    };
+  },
+
+  // =====================================================================
+  // PENGEMBANGAN TINGKAT 2 — Item #3: agregasi ringkas untuk dashboard.
+  // Murni membaca & menghitung dari data yang sudah ada (jembatan, drainase,
+  // perlengkapan jalan), tidak menambah tabel/kolom baru.
+  // =====================================================================
+  async asetRingkasKabupaten(){
+    const [jembatan, drainase, perlengkapan] = await Promise.all([
+      sb.from('aset_jembatan').select('id, ruas_jalan(kabupaten_id, kabupaten(nama))'),
+      sb.from('aset_drainase').select('id, segmen_jalan(ruas_jalan(kabupaten_id, kabupaten(nama)))'),
+      sb.from('perlengkapan_jalan').select('id, segmen_jalan(ruas_jalan(kabupaten_id, kabupaten(nama)))'),
+    ]);
+    if(jembatan.error) throw jembatan.error;
+    if(drainase.error) throw drainase.error;
+    if(perlengkapan.error) throw perlengkapan.error;
+    const totals = {};
+    function tambah(nama){
+      nama = nama || 'Belum diketahui';
+      totals[nama] = (totals[nama]||0) + 1;
+    }
+    (jembatan.data||[]).forEach(r=>tambah(r.ruas_jalan?.kabupaten?.nama));
+    (drainase.data||[]).forEach(r=>tambah(r.segmen_jalan?.ruas_jalan?.kabupaten?.nama));
+    (perlengkapan.data||[]).forEach(r=>tambah(r.segmen_jalan?.ruas_jalan?.kabupaten?.nama));
+    return {
+      totalJembatan: (jembatan.data||[]).length,
+      totalDrainase: (drainase.data||[]).length,
+      totalPerlengkapan: (perlengkapan.data||[]).length,
+      perKabupaten: Object.entries(totals).map(([kabupaten,total])=>({kabupaten,total})).sort((a,b)=>b.total-a.total),
+    };
+  },
+
+  // =====================================================================
+  // PENGEMBANGAN TINGKAT 2 — Item #5: sumber data tambahan untuk panel
+  // notifikasi (aset & kejadian bencana yang baru dicatat/diperbarui).
+  // =====================================================================
+  async asetTerbaru(jamBatas=48){
+    const sejak = new Date(Date.now() - jamBatas*3600000).toISOString();
+    const [jembatan, drainase, perlengkapan] = await Promise.all([
+      sb.from('aset_jembatan').select('id,nama_jembatan,updated_at,ruas_jalan(kode_ruas,nama_ruas)').gte('updated_at', sejak),
+      sb.from('aset_drainase').select('id,jenis,created_at,segmen_jalan(ruas_jalan(kode_ruas,nama_ruas))').gte('created_at', sejak),
+      sb.from('perlengkapan_jalan').select('id,jenis,created_at,segmen_jalan(ruas_jalan(kode_ruas,nama_ruas))').gte('created_at', sejak),
+    ]);
+    if(jembatan.error) throw jembatan.error;
+    if(drainase.error) throw drainase.error;
+    if(perlengkapan.error) throw perlengkapan.error;
+    const hasil = [
+      ...(jembatan.data||[]).map(r=>({ id:'jembatan:'+r.id, tipe:'Jembatan', label:r.nama_jembatan, ruas:r.ruas_jalan, waktu:r.updated_at })),
+      ...(drainase.data||[]).map(r=>({ id:'drainase:'+r.id, tipe:'Drainase', label:(r.jenis||'—').replaceAll('_',' '), ruas:r.segmen_jalan?.ruas_jalan, waktu:r.created_at })),
+      ...(perlengkapan.data||[]).map(r=>({ id:'perlengkapan:'+r.id, tipe:'Perlengkapan Jalan', label:(r.jenis||'—').replaceAll('_',' '), ruas:r.segmen_jalan?.ruas_jalan, waktu:r.created_at })),
+    ];
+    hasil.sort((a,b)=> new Date(b.waktu) - new Date(a.waktu));
+    return hasil;
+  },
+  async bencanaTerbaru(jamBatas=72){
+    const sejak = new Date(Date.now() - jamBatas*3600000).toISOString();
+    const {data,error} = await sb.from('v_kejadian_bencana').select('*').gte('created_at', sejak).order('created_at',{ascending:false});
+    if(error) throw error; return data;
+  },
 };
 
 // --- 5. AUTH ---------------------------------------------------------------
@@ -1469,6 +1682,11 @@ const ICONS = {
   moon:'<path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/>',
   sliders:'<path d="M4 6h10M4 12h16M4 18h7"/><circle cx="17" cy="6" r="2" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="2" fill="currentColor" stroke="none"/>',
   printer:'<path d="M6 9V3h12v6"/><rect x="4" y="9" width="16" height="8" rx="1.5"/><path d="M6 17v4h12v-4"/><circle cx="17" cy="12.5" r=".6" fill="currentColor" stroke="none"/>',
+  // --- Pengembangan Tingkat 2 — Item #1: ikon pencarian global lintas modul ---
+  search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
+  // --- Pengembangan Tingkat 2 — Item #2: ikon untuk preset filter tersimpan ---
+  bookmark:'<path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"/>',
+  layers:'<path d="m12 2 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/>',
 };
 function actionBtns({onEdit, onDelete, onDetail}={}){
   let html = '<div class="flex items-center gap-1.5" onclick="event.stopPropagation()">';
@@ -1554,7 +1772,16 @@ function renderShell(){
         <div class="md:hidden flex items-center gap-2 min-w-0">
           <span class="font-display font-extrabold text-[15px] tracking-tight truncate"><span class="text-accent">SI</span><span class="text-ink-900">JALAN</span></span>
         </div>
-        <div class="flex-1"></div>
+        <!-- Pengembangan Tingkat 2 — Item #1: pencarian global lintas modul -->
+        <div class="relative flex-1 max-w-md hidden sm:block">
+          <div class="relative">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400">${icon('search','w-4 h-4')}</span>
+            <input id="global-search-input" placeholder="Cari ruas, kegiatan, aset, penugasan…" class="!pl-9 !py-2 text-[13px]" autocomplete="off">
+          </div>
+          <div id="global-search-panel" class="hidden absolute left-0 top-11 w-full max-h-[26rem] overflow-y-auto card shadow-xl z-40"></div>
+        </div>
+        <button id="btn-mobile-search" class="sm:hidden p-2 rounded-lg hover:bg-[#EEF1F6] text-ink-600" title="Cari"><span>${icon('search','w-5 h-5')}</span></button>
+        <div class="flex-1 sm:hidden"></div>
         <span id="conn-badge" class="hidden inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-white bg-[var(--bad)]/90 rounded-full px-2.5 py-1">${icon('wifioff','w-3.5 h-3.5')}Offline<span id="offline-badge" class="hidden ml-0.5 bg-white/25 rounded-full px-1.5">0</span></span>
         <button id="theme-toggle" class="p-2 rounded-lg hover:bg-[#EEF1F6] text-ink-600" title="${state.theme==='gelap'?'Ganti ke mode terang':'Ganti ke mode gelap'}">${icon(state.theme==='gelap'?'sun':'moon','w-5 h-5')}</button>
         <div class="relative">
@@ -1565,6 +1792,13 @@ function renderShell(){
           <div id="notif-panel" class="hidden absolute right-0 top-11 w-80 max-h-96 overflow-y-auto card shadow-xl z-40"></div>
         </div>
       </header>
+      <div id="mobile-search-bar" class="hidden sm:hidden bg-white border-b border-line px-4 py-2.5 relative">
+        <div class="relative">
+          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400">${icon('search','w-4 h-4')}</span>
+          <input id="global-search-input-mobile" placeholder="Cari ruas, kegiatan, aset, penugasan…" class="!pl-9 !py-2 text-[13px]" autocomplete="off">
+        </div>
+        <div id="global-search-panel-mobile" class="hidden card shadow-xl mt-2 max-h-[22rem] overflow-y-auto"></div>
+      </div>
       <main class="flex-1 max-w-[1400px] w-full mx-auto px-5 py-7" id="view"></main>
       <footer class="text-center text-[11.5px] text-ink-400 py-6">SIJALAN — Sistem Informasi Jalan · Bina Marga, Dinas Pekerjaan Umum dan Perumahan Rakyat Provinsi Nusa Tenggara Timur</footer>
     </div>
@@ -1581,8 +1815,94 @@ function renderShell(){
   if(overlay) overlay.addEventListener('click', ()=>{ state.mobileNavOpen=false; renderShell(); });
   updateConnBadge(); updateOfflineBadge();
   wireNotifBell();
+  wireGlobalSearch();
   document.getElementById('theme-toggle')?.addEventListener('click', ()=>{ toggleTema(); renderShell(); });
+  const mobileSearchBtn = document.getElementById('btn-mobile-search');
+  const mobileSearchBar = document.getElementById('mobile-search-bar');
+  if(mobileSearchBtn && mobileSearchBar){
+    mobileSearchBtn.addEventListener('click', ()=>{
+      mobileSearchBar.classList.toggle('hidden');
+      if(!mobileSearchBar.classList.contains('hidden')) document.getElementById('global-search-input-mobile')?.focus();
+    });
+  }
   routeView();
+}
+
+// =====================================================================
+// PENGEMBANGAN TINGKAT 2 — Item #1: Pencarian global lintas modul.
+// Satu kotak pencarian yang mencari ke seluruh modul sekaligus (ruas,
+// kegiatan, aset, dokumen, penugasan) lewat api.globalSearch — hanya
+// membaca data yang sudah ada lewat API yang sudah tersedia.
+// =====================================================================
+function wireGlobalSearch(){
+  const pairs = [
+    {input: document.getElementById('global-search-input'), panel: document.getElementById('global-search-panel')},
+    {input: document.getElementById('global-search-input-mobile'), panel: document.getElementById('global-search-panel-mobile')},
+  ].filter(p=>p.input && p.panel);
+  if(!pairs.length) return;
+
+  function gotoRuas(id){ state.route='ruas'; state.selectedRuasId=id; renderShell(); }
+  function gotoKegiatan(){ state.route='kegiatan'; renderShell(); }
+  function gotoDokumen(penangananId){ state.route='dokumen'; state.selectedDokKegiatanId=penangananId; renderShell(); }
+  function gotoAset(){ state.route='aset'; state.asetTab='jembatan'; renderShell(); }
+  function gotoPenugasan(){ state.route='penugasan'; renderShell(); }
+  function gotoBencana(){ state.route='bencana'; renderShell(); }
+
+  function itemRow(title, sub, onClick){
+    return `<button type="button" class="w-full text-left px-3 py-2.5 border-b border-line hover:bg-[#F8FAFD]" data-gs-item>
+      <div class="font-semibold text-[13px]">${title}</div>
+      <div class="text-[12px] text-ink-500 mt-0.5">${sub}</div>
+    </button>`;
+  }
+  function section(title, items){
+    if(!items.length) return '';
+    return `<div><div class="px-3 pt-3 pb-1 font-display font-bold text-[11.5px] text-ink-400 uppercase tracking-wide">${title}</div>${items.join('')}</div>`;
+  }
+
+  pairs.forEach(({input, panel})=>{
+    let acts = [];
+    const doSearch = debounce(async ()=>{
+      const q = input.value.trim();
+      if(q.length < 2){ panel.classList.add('hidden'); panel.innerHTML=''; return; }
+      panel.classList.remove('hidden');
+      panel.innerHTML = `<div class="p-4 text-center text-ink-400 text-[12.5px]">Mencari…</div>`;
+      let hasil;
+      try{ hasil = await api.globalSearch(q); }
+      catch(err){ panel.innerHTML = `<div class="p-4 text-center text-[var(--bad)] text-[12.5px]">${terjemahkanErrorDb(err)}</div>`; return; }
+      acts = [];
+      const htmlParts = [];
+      htmlParts.push(section('Ruas Jalan', hasil.ruas.map(r=>{
+        acts.push(()=>gotoRuas(r.id));
+        return itemRow(`${r.kode_ruas} — ${r.nama_ruas}`, r.kabupaten?.nama||'—');
+      })));
+      htmlParts.push(section('Kegiatan Penanganan', hasil.kegiatan.map(k=>{
+        acts.push(()=>gotoKegiatan());
+        return itemRow(`${k.kode_ruas} — ${k.nama_ruas}`, `${(k.jenis_penanganan||'—').replaceAll('_',' ')} · ${fmtDate(k.tanggal_penanganan)}`);
+      })));
+      htmlParts.push(section('Dokumen Kegiatan', hasil.kegiatan.map(k=>{
+        acts.push(()=>gotoDokumen(k.penanganan_id));
+        return itemRow(`Dokumen: ${k.kode_ruas} — ${k.nama_ruas}`, `Lihat kelengkapan dokumen kegiatan ini`);
+      })));
+      htmlParts.push(section('Aset (Jembatan)', hasil.jembatan.map(j=>{
+        acts.push(()=>gotoAset());
+        return itemRow(j.nama_jembatan, j.ruas_jalan? `${j.ruas_jalan.kode_ruas} — ${j.ruas_jalan.nama_ruas}` : '—');
+      })));
+      htmlParts.push(section('Penugasan Survei', hasil.penugasan.map(p=>{
+        acts.push(()=>gotoPenugasan());
+        return itemRow(`${p.kode_ruas||''} ${p.nama_ruas||''}`.trim(), `${p.nama_petugas||'—'} · ${PENUGASAN_STATUS_LABEL[p.status]||p.status}`);
+      })));
+      htmlParts.push(section('Kejadian Bencana', hasil.bencana.map(b=>{
+        acts.push(()=>gotoBencana());
+        return itemRow(`${b.kode_ruas||''} ${b.nama_ruas||''}`.trim(), `${(b.jenis_kejadian||'—').replaceAll('_',' ')} · ${fmtDate(b.tanggal_kejadian)}`);
+      })));
+      const gabung = htmlParts.join('');
+      panel.innerHTML = gabung.trim() ? gabung : `<div class="p-4 text-center text-ink-400 text-[12.5px]">Tidak ada hasil untuk "${q}".</div>`;
+      panel.querySelectorAll('[data-gs-item]').forEach((el,i)=>{ el.addEventListener('click', ()=>acts[i]()); });
+    }, 320);
+    input.addEventListener('input', doSearch);
+    input.addEventListener('focus', ()=>{ if(input.value.trim().length>=2) panel.classList.remove('hidden'); });
+    document.addEventListener('click', (e)=>{ if(!panel.contains(e.target) && e.target!==input) panel.classList.add('hidden'); });
+  });
 }
 
 // --- NOTIFIKASI: penugasan survei lewat tenggat, kegiatan lewat target, dokumen kurang ---
@@ -1603,18 +1923,25 @@ async function wireNotifBell(){
   const panel = document.getElementById('notif-panel');
   const countEl = document.getElementById('notif-count');
   if(!btn) return;
-  let overdue = [], kegiatanOverdue = [], dokumenKurang = [];
-  const hasil = await Promise.allSettled([api.penugasanOverdue(), api.kegiatanOverdue(), api.kegiatanDokumenKurang()]);
+  let overdue = [], kegiatanOverdue = [], dokumenKurang = [], asetBaru = [], bencanaBaru = [];
+  // Pengembangan Tingkat 2 — Item #5: perluas panel notifikasi yang sudah
+  // ada agar juga mencakup perubahan pada data Aset dan Bencana — memakai
+  // mekanisme notifikasi yang sudah berjalan, hanya menambah sumber data.
+  const hasil = await Promise.allSettled([api.penugasanOverdue(), api.kegiatanOverdue(), api.kegiatanDokumenKurang(), api.asetTerbaru(48), api.bencanaTerbaru(72)]);
   if(hasil[0].status==='fulfilled') overdue = hasil[0].value; else console.error('[notif] gagal memuat penugasan overdue:', hasil[0].reason);
   if(hasil[1].status==='fulfilled') kegiatanOverdue = hasil[1].value; else console.error('[notif] gagal memuat kegiatan overdue:', hasil[1].reason);
   if(hasil[2].status==='fulfilled') dokumenKurang = hasil[2].value; else console.error('[notif] gagal memuat kegiatan dokumen kurang:', hasil[2].reason);
+  if(hasil[3].status==='fulfilled') asetBaru = hasil[3].value; else console.error('[notif] gagal memuat aset terbaru:', hasil[3].reason);
+  if(hasil[4].status==='fulfilled') bencanaBaru = hasil[4].value; else console.error('[notif] gagal memuat bencana terbaru:', hasil[4].reason);
 
   function renderPanel(){
     const hidden = getNotifHiddenSet();
     const overdueTampil = overdue.filter(o=>!hidden.has(`penugasan:${o.id}`));
     const kegiatanTampil = kegiatanOverdue.filter(k=>!hidden.has(`kegiatan:${k.penanganan_id}`));
     const dokumenTampil = dokumenKurang.filter(d=>!hidden.has(`dokumen:${d.penanganan_id}`));
-    const totalCount = overdueTampil.length + kegiatanTampil.length + dokumenTampil.length;
+    const asetTampil = asetBaru.filter(a=>!hidden.has(a.id));
+    const bencanaTampil = bencanaBaru.filter(b=>!hidden.has(`bencana:${b.id}`));
+    const totalCount = overdueTampil.length + kegiatanTampil.length + dokumenTampil.length + asetTampil.length + bencanaTampil.length;
     if(totalCount){ countEl.textContent = totalCount > 99 ? '99+' : totalCount; countEl.classList.remove('hidden'); }
     else { countEl.classList.add('hidden'); }
 
@@ -1656,6 +1983,24 @@ async function wireNotifBell(){
             <div class="text-[11.5px] text-[var(--bad)] mt-0.5 font-medium">${d.jumlah_dokumen_kurang} dokumen wajib belum lengkap</div>
           </div>
           ${hideBtn(`dokumen:${d.penanganan_id}`)}
+        </div>`),
+      // Pengembangan Tingkat 2 — Item #5: notifikasi data Aset yang baru dicatat/diperbarui.
+      notifSection('Aset Diperbarui', asetTampil, 'aset', a=>`
+        <div class="px-3 py-2.5 border-b border-line hover:bg-[#F8FAFD]">
+          <div data-notif-goto="aset" class="cursor-pointer">
+            <div class="font-semibold text-[13px]">${a.tipe}: ${a.label}</div>
+            <div class="text-[12px] text-ink-500 mt-0.5">${a.ruas? `${a.ruas.kode_ruas} — ${a.ruas.nama_ruas}` : 'Ruas tidak diketahui'} · ${fmtDate(a.waktu)}</div>
+          </div>
+          ${hideBtn(a.id)}
+        </div>`),
+      // Pengembangan Tingkat 2 — Item #5: notifikasi kejadian bencana yang baru dicatat.
+      notifSection('Kejadian Bencana Baru', bencanaTampil, 'bencana', b=>`
+        <div class="px-3 py-2.5 border-b border-line hover:bg-[#F8FAFD]">
+          <div data-notif-goto="bencana" class="cursor-pointer">
+            <div class="font-semibold text-[13px]">${b.kode_ruas||'—'} — ${b.nama_ruas||'Ruas tidak diketahui'}</div>
+            <div class="text-[12px] text-ink-500 mt-0.5">${(b.jenis_kejadian||'—').replaceAll('_',' ')} · ${fmtDate(b.tanggal_kejadian)}</div>
+          </div>
+          ${hideBtn(`bencana:${b.id}`)}
         </div>`),
     ].join('');
 
@@ -1851,8 +2196,9 @@ async function viewDashboard(){
     <div class="grid lg:grid-cols-2 gap-5"><div class="skel h-80"></div><div class="skel h-80"></div></div>
   </div>`;
   try{
-    const [ruas, kabupaten, rekapKondisi, rekapAnggaran, rekapAnggaranKab, skorPrioritas, trenKondisi] = await Promise.all([
-      api.ruasList(), api.kabupaten(), api.rekapKondisiKabupaten(), api.rekapAnggaran(), api.rekapAnggaranKabupaten(), api.skorPrioritas(10).catch(()=>[]), api.trenKondisiTahunan().catch(()=>[])
+    const [ruas, kabupaten, rekapKondisi, rekapAnggaran, rekapAnggaranKab, skorPrioritas, trenKondisi, kegiatanSemua, asetRingkas] = await Promise.all([
+      api.ruasList(), api.kabupaten(), api.rekapKondisiKabupaten(), api.rekapAnggaran(), api.rekapAnggaranKabupaten(), api.skorPrioritas(10).catch(()=>[]), api.trenKondisiTahunan().catch(()=>[]),
+      api.kegiatanList().catch(()=>[]), api.asetRingkasKabupaten().catch(()=>null)
     ]);
     state.ruasCache = ruas; state.kabupatenList = kabupaten;
 
@@ -1951,6 +2297,41 @@ async function viewDashboard(){
           </div>
         `).join('')}
       </div>`}
+    </div>
+
+    <!-- =====================================================================
+         PENGEMBANGAN TINGKAT 2 — Item #3: Statistik ringkas tambahan di
+         dashboard. Murni agregasi dari data yang sudah ada (tidak menambah
+         tabel/kolom baru): jumlah aset per kabupaten & rasio status kegiatan.
+         ===================================================================== -->
+    <div class="grid lg:grid-cols-2 gap-5 mt-5">
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="font-display font-bold text-[15px]">Aset Pendukung per Kabupaten/Kota</h3>
+          <span class="font-mono text-[11px] text-ink-400">Jembatan · Drainase · Perlengkapan</span>
+        </div>
+        ${!asetRingkas || !asetRingkas.perKabupaten.length ? `<p class="text-[13px] text-ink-500">Belum ada data aset pendukung tercatat.</p>` : `
+        <div class="flex flex-wrap gap-4 mb-4 text-[12.5px] text-ink-600">
+          <div>${icon('bridge','w-3.5 h-3.5 inline -mt-0.5')} Jembatan: <span class="font-semibold text-ink-900">${fmtNum(asetRingkas.totalJembatan)}</span></div>
+          <div>Drainase: <span class="font-semibold text-ink-900">${fmtNum(asetRingkas.totalDrainase)}</span></div>
+          <div>Perlengkapan: <span class="font-semibold text-ink-900">${fmtNum(asetRingkas.totalPerlengkapan)}</span></div>
+        </div>
+        <div class="space-y-2">
+          ${(()=>{ const maxTotal = Math.max(...asetRingkas.perKabupaten.map(r=>r.total),1); return asetRingkas.perKabupaten.map(r=>`
+          <div class="flex items-center gap-3">
+            <span class="text-[12px] text-ink-600 w-32 truncate shrink-0" title="${r.kabupaten}">${r.kabupaten}</span>
+            <div class="flex-1 h-2.5 rounded-full bg-[#EEF1F6] overflow-hidden"><div class="h-full rounded-full" style="width:${r.total/maxTotal*100}%;background:var(--navy-600)"></div></div>
+            <span class="font-mono text-[12px] text-ink-500 w-8 text-right shrink-0">${r.total}</span>
+          </div>`).join(''); })()}
+        </div>`}
+      </div>
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="font-display font-bold text-[15px]">Rasio Status Kegiatan Penanganan</h3>
+          <span class="font-mono text-[11px] text-ink-400">${fmtNum(kegiatanSemua.length)} kegiatan tercatat</span>
+        </div>
+        ${!kegiatanSemua.length ? `<p class="text-[13px] text-ink-500">Belum ada kegiatan penanganan tercatat.</p>` : `<div style="height:260px"><canvas id="chart-status-kegiatan"></canvas></div>`}
+      </div>
     </div>`;
 
     // Chart: kondisi per kabupaten (stacked bar)
@@ -2001,6 +2382,16 @@ async function viewDashboard(){
       indexAxis:'y',
       scales:{x:{ticks:{callback:v=>fmtRp(v)}}, y:{ticks:{font:{size:10}}}}
     });
+
+    // Chart: rasio status kegiatan penanganan (Pengembangan Tingkat 2 — Item #3)
+    if(kegiatanSemua.length){
+      const statusCounts = STATUS_PEKERJAAN_OPT.map(([v])=>kegiatanSemua.filter(k=>k.status_pekerjaan===v).length);
+      const statusColor = {perencanaan:'#8896AC', proses_lelang:'#E8A33D', dalam_pengerjaan:'#1D5FA8', selesai:'#2E8B57', terhenti:'#C43D3D'};
+      mkChart('chart-status-kegiatan', 'doughnut', {
+        labels: STATUS_PEKERJAAN_OPT.map(([,l])=>l),
+        datasets: [{ data: statusCounts, backgroundColor: STATUS_PEKERJAAN_OPT.map(([v])=>statusColor[v]||'#8896AC') }]
+      }, { plugins:{legend:{position:'bottom'}} });
+    }
 
     if(rekapKondisi.length===0 && rekapAnggaran.length===0){
       v.insertAdjacentHTML('beforeend', emptyStateNotice());
@@ -2474,6 +2865,8 @@ async function viewRuas(){
       <select id="f-fungsi" class="max-w-[180px]"><option value="">Semua Fungsi</option><option value="arteri">Arteri</option><option value="kolektor">Kolektor</option><option value="lokal">Lokal</option></select>
       <select id="f-kondisi" class="max-w-[180px]"><option value="">Semua Kondisi</option>${KONDISI_ORDER.map(k=>`<option value="${k}">${KONDISI_LABEL[k]}</option>`).join('')}</select>
       <button id="f-reset" type="button" class="btn-ghost !py-1.5 !px-3 text-[12.5px]">Reset Filter</button>
+      <!-- Pengembangan Tingkat 2 — Item #2: preset filter tersimpan -->
+      <div id="f-preset-wrap"></div>
       <div class="flex-1"></div>
       ${colPickerHtml('ruas')}
     </div>
@@ -2505,6 +2898,23 @@ async function viewRuas(){
       kabExportBox.classList.toggle('hidden', !kab);
       if(kab) document.getElementById('ruas-kab-export-nama').textContent = kab.nama;
     }
+    // Pengembangan Tingkat 2 — Item #2: preset filter tersimpan (kombinasi
+    // filter yang sering dipakai, mis. kabupaten + status tertentu).
+    wireFilterPresets(document.getElementById('f-preset-wrap'), 'ruas', ()=>({
+      search: document.getElementById('f-search').value,
+      kabupaten: document.getElementById('f-kabupaten').value,
+      status: document.getElementById('f-status').value,
+      fungsi: document.getElementById('f-fungsi').value,
+      kondisi: document.getElementById('f-kondisi').value,
+    }), (f)=>{
+      document.getElementById('f-search').value = f.search||'';
+      document.getElementById('f-kabupaten').value = f.kabupaten||'';
+      document.getElementById('f-status').value = f.status||'';
+      document.getElementById('f-fungsi').value = f.fungsi||'';
+      document.getElementById('f-kondisi').value = f.kondisi||'';
+      toggleKabExportBox();
+      renderRowsResetPage();
+    });
 
     // Usulan #7 & #10: state sortir kolom dan paginasi "muat lebih banyak" untuk tabel ini.
     const sortState = {key:null, dir:'asc'};
@@ -3823,7 +4233,7 @@ async function viewPenugasan(){
   const v = document.getElementById('view');
   v.innerHTML = `<div class="skel h-10 w-full mb-4"></div>${skeletonTable(6)}`;
   try{
-    const [penugasan, ruas, staf] = await Promise.all([api.penugasanList(), api.ruasList(), api.staffList()]);
+    const [penugasan, ruas, staf, kabupaten] = await Promise.all([api.penugasanList(), api.ruasList(), api.staffList(), api.kabupaten()]);
     v.innerHTML = `
     <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
       <div><h1 class="font-display font-extrabold text-2xl text-ink-900">Penugasan Survei</h1>
@@ -3835,6 +4245,14 @@ async function viewPenugasan(){
       <select id="pn-status" class="max-w-[200px]"><option value="">Semua Status</option>${Object.keys(PENUGASAN_STATUS_LABEL).map(s=>`<option value="${s}">${PENUGASAN_STATUS_LABEL[s]}</option>`).join('')}</select>
       ${!isPenugas()?`<label class="flex items-center gap-2 text-[12.5px] text-ink-600"><input id="pn-mine" type="checkbox" class="!w-auto">Hanya tugas saya</label>`:''}
       <button id="pn-reset" type="button" class="btn-ghost !py-1.5 !px-3 text-[12.5px]">Reset Filter</button>
+      <div class="flex-1"></div>
+      <!-- Pengembangan Tingkat 2 — Item #4: export gabungan (reuse
+           exportKabupatenGabungan yang sama dipakai di modul Ruas Jalan). -->
+      <select id="pn-f-kabupaten" class="max-w-[220px]"><option value="">Export gabungan per kabupaten…</option>${kabupaten.map(k=>`<option value="${k.id}">${k.nama}</option>`).join('')}</select>
+    </div>
+    <div id="pn-kab-export" class="hidden card p-3.5 mb-4 flex items-center justify-between flex-wrap gap-3 bg-[#F3F6FA]">
+      <div class="text-[13px] text-ink-600">Export gabungan ruas + kegiatan + anggaran + aset + penugasan untuk <span id="pn-kab-export-nama" class="font-semibold text-ink-800"></span></div>
+      <div id="pn-kab-export-btns"></div>
     </div>
     <div class="card overflow-x-auto">
       <table><thead><tr><th data-sort-key="ruas">Ruas</th><th data-sort-key="kabupaten">Kab/Kota</th><th data-sort-key="staf">Staf</th><th data-sort-key="target">Target</th><th data-sort-key="status">Status</th><th>Catatan</th>${isPenugas()?'<th>Aksi</th>':''}</tr></thead>
@@ -3900,6 +4318,18 @@ async function viewPenugasan(){
         try{ await api.deletePenugasan(id); viewPenugasan(); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
       }));
     }
+    // Pengembangan Tingkat 2 — Item #4: wiring kotak export gabungan per kabupaten.
+    const pnKabExportBox = document.getElementById('pn-kab-export');
+    const pnFKab = document.getElementById('pn-f-kabupaten');
+    document.getElementById('pn-kab-export-btns').innerHTML = exportButtons();
+    wireExportButtons(document.getElementById('pn-kab-export-btns'),
+      ()=>exportKabupatenGabungan(pnFKab.value, kabupaten, 'excel'),
+      ()=>exportKabupatenGabungan(pnFKab.value, kabupaten, 'pdf'));
+    pnFKab.addEventListener('input', ()=>{
+      const kab = kabupaten.find(k=>k.id===pnFKab.value);
+      pnKabExportBox.classList.toggle('hidden', !kab);
+      if(kab) document.getElementById('pn-kab-export-nama').textContent = kab.nama;
+    });
     function renderRowsResetPage(){ pageState.shown = pageState.step; renderRows(); }
     document.getElementById('pn-search').addEventListener('input', debounce(renderRowsResetPage, 300));
     document.getElementById('pn-status').addEventListener('input', renderRowsResetPage);
@@ -4036,11 +4466,37 @@ async function viewAset(){
   v.innerHTML = `
     <div class="mb-4"><h1 class="font-display font-extrabold text-2xl text-ink-900">Aset Pendukung Jalan</h1>
     <p class="text-ink-500 text-[13.5px]">Data jembatan, drainase, perlengkapan, dan lalu lintas pada seluruh ruas</p></div>
+    <!-- Pengembangan Tingkat 2 — Item #4: perluasan export gabungan (reuse
+         exportKabupatenGabungan yang sama dipakai di modul Ruas Jalan) agar
+         juga tersedia di modul Aset. -->
+    <div class="flex flex-wrap items-center gap-3 mb-4">
+      <select id="aset-f-kabupaten" class="max-w-[240px]"><option value="">Export gabungan per kabupaten…</option></select>
+    </div>
+    <div id="aset-kab-export" class="hidden card p-3.5 mb-4 flex items-center justify-between flex-wrap gap-3 bg-[#F3F6FA]">
+      <div class="text-[13px] text-ink-600">Export gabungan ruas + kegiatan + anggaran + aset + penugasan untuk <span id="aset-kab-export-nama" class="font-semibold text-ink-800"></span></div>
+      <div id="aset-kab-export-btns"></div>
+    </div>
     <div class="flex gap-1 mb-4 border-b border-line">
       ${ASET_TABS.map(t=>`<button data-aset-tab="${t.id}" class="px-4 py-2.5 text-[13px] font-semibold -mb-px border-b-2 ${state.asetTab===t.id?'text-navy-700 border-navy-700':'text-ink-400 border-transparent'}">${t.label}</button>`).join('')}
     </div>
     <div id="aset-body">${skeletonTable(8)}</div>`;
   v.querySelectorAll('[data-aset-tab]').forEach(btn=>btn.addEventListener('click', ()=>{ state.asetTab = btn.dataset.asetTab; viewAset(); }));
+  try{
+    const kabupaten = await api.kabupaten();
+    state.kabupatenList = kabupaten;
+    const fKab = document.getElementById('aset-f-kabupaten');
+    fKab.innerHTML = '<option value="">Export gabungan per kabupaten…</option>' + kabupaten.map(k=>`<option value="${k.id}">${k.nama}</option>`).join('');
+    const kabExportBox = document.getElementById('aset-kab-export');
+    document.getElementById('aset-kab-export-btns').innerHTML = exportButtons();
+    wireExportButtons(document.getElementById('aset-kab-export-btns'),
+      ()=>exportKabupatenGabungan(fKab.value, kabupaten, 'excel'),
+      ()=>exportKabupatenGabungan(fKab.value, kabupaten, 'pdf'));
+    fKab.addEventListener('input', ()=>{
+      const kab = kabupaten.find(k=>k.id===fKab.value);
+      kabExportBox.classList.toggle('hidden', !kab);
+      if(kab) document.getElementById('aset-kab-export-nama').textContent = kab.nama;
+    });
+  }catch(err){ console.error('[aset-export-kabupaten] gagal memuat daftar kabupaten:', err); }
   if(state.asetTab==='jembatan') renderJembatanTab();
   else if(state.asetTab==='drainase') renderDrainaseTab();
   else if(state.asetTab==='perlengkapan') renderPerlengkapanTab();
