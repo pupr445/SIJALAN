@@ -132,6 +132,26 @@
   html[data-theme="dark"] .modal-overlay{ background:rgba(3,10,20,.7); }
   html[data-theme="dark"] .badge-na{ background:#1C2A42; }
   html[data-theme="dark"] .btn-ghost{ color:var(--ink-600); }
+  /* Perbaikan: elemen dengan warna latar terang yang di-hardcode (bukan var(--surface)/.bg-white)
+     tidak ikut berubah di mode gelap, sehingga teks (yang memakai var(--ink-*), otomatis jadi
+     terang di mode gelap) menjadi tak terbaca di atasnya. Samakan semua ke latar gelap. */
+  html[data-theme="dark"] .bg-\[\#EEF1F6\]{ background:#1B2C46 !important; }
+  html[data-theme="dark"] .bg-\[\#EEF3FA\]{ background:#1A3358 !important; }
+  html[data-theme="dark"] .bg-\[\#F3F6FA\]{ background:#16233A !important; }
+  html[data-theme="dark"] .bg-\[\#F5F7FA\]{ background:#16233A !important; }
+  html[data-theme="dark"] .hover\:bg-\[\#F5F7FA\]:hover{ background:#16233A !important; }
+  html[data-theme="dark"] .bg-\[\#F8FAFC\]{ background:#16233A !important; }
+  html[data-theme="dark"] .bg-\[\#F8FAFD\]{ background:#16233A !important; }
+  html[data-theme="dark"] .hover\:bg-\[\#F8FAFD\]:hover{ background:#16233A !important; }
+  html[data-theme="dark"] .bg-\[\#E7F0FB\]{ background:#17304F !important; }
+  html[data-theme="dark"] .bg-\[\#E7F5EC\]{ background:#123328 !important; }
+  html[data-theme="dark"] .bg-\[\#FBE4E4\]{ background:#3A1E1E !important; }
+  html[data-theme="dark"] .bg-\[\#FCF1DF\]{ background:#3A311A !important; }
+  html[data-theme="dark"] .hover\:bg-\[\#EEF1F6\]:hover{ background:#1B2C46 !important; }
+  html[data-theme="dark"] .hover\:bg-\[\#FBE4E4\]:hover{ background:#3A1E1E !important; }
+  html[data-theme="dark"] .text-\[\#8A5A0E\]{ color:#E8B85C !important; }
+  html[data-theme="dark"] .from-\[\#F5F7FB\]{ --tw-gradient-from:#142238 var(--tw-gradient-from-position); --tw-gradient-to:rgb(20 34 56 / 0) var(--tw-gradient-to-position); --tw-gradient-stops:var(--tw-gradient-from), var(--tw-gradient-to); }
+  html[data-theme="dark"] .to-\[\#EEF2FA\]{ --tw-gradient-to:#1A2C46 var(--tw-gradient-to-position); }
   #theme-toggle{ color:inherit; }
 
   /* =====================================================================
