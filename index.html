@@ -104,6 +104,77 @@
   .patok{width:2px; background:rgba(255,255,255,.35);}
   .leaflet-container{border-radius:12px; z-index:0;}
   @media(prefers-reduced-motion: reduce){ .skel{animation:none;} }
+
+  /* =====================================================================
+     PENGEMBANGAN TINGKAT 1 — Item #1: Mode Gelap (Dark Mode)
+     ===================================================================== */
+  html[data-theme="dark"]{
+    --canvas:#0B1522; --surface:#122033; --line:#233A55;
+    --ink-900:#EAF0FA; --ink-600:#B7C4DA; --ink-500:#95A6C2; --ink-400:#6E82A3;
+    --navy-950:#060D18; --navy-900:#0A1830; --navy-800:#102640; --navy-700:#1A3A62; --navy-600:#2A5FA0;
+  }
+  html[data-theme="dark"] body{ background:var(--canvas); color:var(--ink-900); }
+  html[data-theme="dark"] .bg-white{ background:var(--surface) !important; }
+  html[data-theme="dark"] input, html[data-theme="dark"] select, html[data-theme="dark"] textarea{
+    background:var(--surface); color:var(--ink-900); border-color:var(--line);
+  }
+  html[data-theme="dark"] th{ color:var(--ink-500); border-color:var(--line); }
+  html[data-theme="dark"] td{ border-color:var(--line); }
+  html[data-theme="dark"] tr.row-hover:hover{ background:#182A44; }
+  html[data-theme="dark"] tr.row-lewat-tenggat{ background:#3A1E1E; }
+  html[data-theme="dark"] tr.row-lewat-tenggat:hover{ background:#4A2424; }
+  html[data-theme="dark"] tr.row-dok-kurang{ background:#3A311A; }
+  html[data-theme="dark"] tr.row-dok-kurang:hover{ background:#4A3E1F; }
+  html[data-theme="dark"] tr.row-baru-diubah{ background:#132D2A; }
+  html[data-theme="dark"] tr.row-baru-diubah:hover{ background:#173A35; }
+  html[data-theme="dark"] .skel{ background:linear-gradient(90deg,#182A44 25%,#20334F 37%,#182A44 63%); background-size:400% 100%; }
+  html[data-theme="dark"] ::-webkit-scrollbar-thumb{ background:#2A3F5C; }
+  html[data-theme="dark"] .modal-overlay{ background:rgba(3,10,20,.7); }
+  html[data-theme="dark"] .badge-na{ background:#1C2A42; }
+  html[data-theme="dark"] .btn-ghost{ color:var(--ink-600); }
+  #theme-toggle{ color:inherit; }
+
+  /* =====================================================================
+     PENGEMBANGAN TINGKAT 1 — Item #2 & #3: Tampilkan/sembunyikan kolom
+     tabel + preferensi tampilan tersimpan (localStorage, per-tabel).
+     ===================================================================== */
+  .col-picker-wrap{ position:relative; }
+  .col-picker-panel{ position:absolute; right:0; top:calc(100% + 6px); z-index:30; width:230px;
+    background:var(--surface); border:1px solid var(--line); border-radius:12px; box-shadow:0 10px 30px rgba(10,20,40,.18); padding:10px; }
+  .col-picker-panel label{ display:flex; align-items:center; gap:8px; padding:5px 4px; border-radius:6px; font-size:12.5px; font-weight:500; cursor:pointer; color:var(--ink-600); }
+  .col-picker-panel label:hover{ background:#F0F4FA; }
+  html[data-theme="dark"] .col-picker-panel label:hover{ background:#1A2C46; }
+  .col-picker-panel input[type=checkbox]{ width:auto; }
+  .col-picker-panel .cp-title{ font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-400); padding:2px 4px 6px; }
+  .col-picker-panel .cp-divider{ border-top:1px solid var(--line); margin:8px 0; }
+  th[data-col].col-hidden, td[data-col].col-hidden{ display:none; }
+
+  /* =====================================================================
+     PENGEMBANGAN TINGKAT 1 — Item #4: Highlight baris "baru diubah" —
+     perluasan dari pola row-lewat-tenggat yang sudah ada.
+     ===================================================================== */
+  tr.row-baru-diubah{ background:#EAF6F2; }
+  tr.row-baru-diubah:hover{ background:#DCEFE8; }
+  .badge-baru{ display:inline-flex; align-items:center; gap:3px; font-size:10.5px; font-weight:700; color:var(--good); background:#E7F5EC; border-radius:999px; padding:1px 7px; margin-left:5px; }
+  html[data-theme="dark"] .badge-baru{ background:#173A35; }
+
+  /* =====================================================================
+     PENGEMBANGAN TINGKAT 1 — Item #5: Versi cetak/ramah-cetak (window.print),
+     terpisah dari export Excel/PDF yang sudah ada.
+     ===================================================================== */
+  @media print{
+    #sidebar-desktop, #sidebar-mobile, #mobile-overlay, header, footer,
+    .no-print, #boot-splash, #conn-badge, #offline-badge, .btn-loadmore{ display:none !important; }
+    body, html[data-theme="dark"] body{ background:#fff !important; color:#000 !important; }
+    .card{ border:1px solid #999 !important; box-shadow:none !important; break-inside:avoid; }
+    main#view{ max-width:100% !important; padding:0 !important; margin:0 !important; }
+    a{ color:#000 !important; text-decoration:none !important; }
+    .print-title{ display:block !important; }
+    body.modal-printing #root{ display:none !important; }
+    body.modal-printing .modal-overlay{ position:static !important; background:none !important; padding:0 !important; }
+    body.modal-printing .modal-overlay .card{ box-shadow:none !important; max-height:none !important; overflow:visible !important; border:none !important; }
+  }
+  .print-title{ display:none; }
 </style>
 </head>
 <body>
@@ -178,13 +249,125 @@ const state = {
   kabupatenList: [], kabupatenById: {}, ruasCache: [], selectedRuasId: null,
   charts: {}, map: null, mapLayer: null,
   sidebarCollapsed: localStorage.getItem('sijalan_sidebar_collapsed')==='1', mobileNavOpen: false,
+  theme: localStorage.getItem('sijalan_theme') || 'terang',
 };
+
+function terapkanTema(){
+  document.documentElement.setAttribute('data-theme', state.theme==='gelap' ? 'dark' : 'light');
+}
+function toggleTema(){
+  state.theme = state.theme==='gelap' ? 'terang' : 'gelap';
+  localStorage.setItem('sijalan_theme', state.theme);
+  terapkanTema();
+}
+terapkanTema();
+
+function getPrefsTabel(tableKey, defaults){
+  try{
+    const saved = JSON.parse(localStorage.getItem('sijalan_prefs_'+tableKey) || 'null');
+    if(!saved) return {...defaults};
+    return {hiddenCols: saved.hiddenCols || [], rowsPerPage: saved.rowsPerPage || defaults.rowsPerPage};
+  }catch(e){ return {...defaults}; }
+}
+function simpanPrefsTabel(tableKey, prefs){
+  try{ localStorage.setItem('sijalan_prefs_'+tableKey, JSON.stringify(prefs)); }catch(e){}
+}
+function colPickerHtml(tableKey){
+  return '<div class="col-picker-wrap no-print"><button type="button" id="cp-btn-'+tableKey+'" class="btn-ghost !py-1.5 !px-3 text-[12.5px] flex items-center gap-1.5">'+icon('sliders','w-3.5 h-3.5')+'Kolom &amp; Tampilan</button><div id="cp-panel-'+tableKey+'" class="col-picker-panel hidden"></div></div>';
+}
+// Dipanggil SEKALI per render-view (bukan setiap renderRows) untuk memasang
+// interaksi tombol/panel & checkbox. Mengembalikan fungsi `apply(tableEl)` yang
+// dipanggil ulang setiap kali isi tabel (tbody) digambar ulang, supaya kolom
+// yang disembunyikan tetap konsisten meski barisnya berganti-ganti.
+function setupColPicker(tableKey, columns, pageState, onRowsPerPageChange){
+  const prefs = getPrefsTabel(tableKey, {hiddenCols:[], rowsPerPage: pageState.step});
+  pageState.shown = prefs.rowsPerPage==='semua' ? Infinity : prefs.rowsPerPage;
+  pageState.step = prefs.rowsPerPage==='semua' ? Infinity : prefs.rowsPerPage;
+  function apply(tableEl){
+    columns.forEach(function(c){
+      const hide = !c.wajib && prefs.hiddenCols.includes(c.key);
+      (tableEl||document).querySelectorAll('[data-col="'+c.key+'"]').forEach(function(el){ el.classList.toggle('col-hidden', hide); });
+    });
+  }
+  const btn = document.getElementById('cp-btn-'+tableKey);
+  const panel = document.getElementById('cp-panel-'+tableKey);
+  if(!btn || !panel) return apply;
+  let html = '<div class="cp-title">Kolom Ditampilkan</div>';
+  columns.filter(function(c){return !c.wajib;}).forEach(function(c){
+    html += '<label><input type="checkbox" data-cp-col="'+c.key+'" '+(prefs.hiddenCols.includes(c.key)?'':'checked')+'>'+c.label+'</label>';
+  });
+  html += '<div class="cp-divider"></div><div class="cp-title">Baris per Halaman</div><select id="cp-rows-'+tableKey+'" class="!py-1.5 text-[12.5px]">';
+  [25,50,100].forEach(function(n){ html += '<option value="'+n+'" '+(prefs.rowsPerPage===n?'selected':'')+'>'+n+' baris</option>'; });
+  html += '<option value="semua" '+(prefs.rowsPerPage==='semua'?'selected':'')+'>Semua baris</option></select>';
+  panel.innerHTML = html;
+  btn.addEventListener('click', function(e){ e.stopPropagation(); panel.classList.toggle('hidden'); });
+  document.addEventListener('click', function(e){ if(!panel.contains(e.target) && e.target!==btn) panel.classList.add('hidden'); });
+  panel.querySelectorAll('[data-cp-col]').forEach(function(cb){
+    cb.addEventListener('change', function(){
+      const key = cb.dataset.cpCol;
+      prefs.hiddenCols = cb.checked ? prefs.hiddenCols.filter(function(k){return k!==key;}) : prefs.hiddenCols.concat([key]);
+      simpanPrefsTabel(tableKey, prefs);
+      apply();
+    });
+  });
+  panel.querySelector('#cp-rows-'+tableKey).addEventListener('change', function(e){
+    const val = e.target.value==='semua' ? 'semua' : Number(e.target.value);
+    prefs.rowsPerPage = val;
+    simpanPrefsTabel(tableKey, prefs);
+    pageState.shown = val==='semua' ? Infinity : val;
+    pageState.step = val==='semua' ? Infinity : val;
+    if(onRowsPerPageChange) onRowsPerPageChange();
+  });
+  return apply;
+}
+
+function baruDiubahSejakJam(row, jamBatas){
+  jamBatas = jamBatas || 48;
+  const ts = row && (row.updated_at || row.created_at);
+  if(!ts) return false;
+  const jam = (Date.now() - new Date(ts).getTime()) / 3600000;
+  return jam >= 0 && jam <= jamBatas;
+}
+function badgeBaru(row, jamBatas){
+  jamBatas = jamBatas || 48;
+  return baruDiubahSejakJam(row, jamBatas) ? '<span class="badge-baru" title="Diperbarui dalam '+jamBatas+' jam terakhir">&#9679; Baru</span>' : '';
+}
+function cetakHalaman(){ window.print(); }
+// Item #5 (lanjutan): cetak konten sebuah modal (mis. detail kegiatan penanganan)
+// tanpa mempengaruhi versi Excel/PDF yang sudah ada — memakai window.print()
+// bawaan browser, dengan modal disembunyikan kecuali kartu kontennya sendiri.
+function cetakModal(){
+  document.body.classList.add('modal-printing');
+  const bersihkan = ()=>document.body.classList.remove('modal-printing');
+  window.addEventListener('afterprint', bersihkan, {once:true});
+  window.print();
+  setTimeout(bersihkan, 1000);
+}
 const KONDISI_LABEL = {baik:'Baik', sedang:'Sedang', rusak_ringan:'Rusak Ringan', rusak_berat:'Rusak Berat'};
 const KONDISI_ORDER = ['rusak_berat','rusak_ringan','sedang','baik'];
 const KONDISI_COLOR = {baik:'#2E8B57', sedang:'#E8A33D', rusak_ringan:'#E0672B', rusak_berat:'#C43D3D'};
 const PENUGASAN_STATUS_LABEL = {belum_disurvei:'Belum Disurvei', sedang_disurvei:'Sedang Disurvei', selesai:'Selesai'};
 const PENUGASAN_STATUS_COLOR = {belum_disurvei:'#8896AC', sedang_disurvei:'#E8A33D', selesai:'#2E8B57'};
 const ROLE_LABEL = {admin:'Administrator', kepala_bidang:'Kepala Bidang', petugas_lapangan:'Petugas Lapangan', viewer:'Peninjau'};
+
+// --- Pengembangan Tingkat 1 · Item #2: definisi kolom untuk pemilih kolom tabel ---
+const RUAS_KOLOM = [
+  {key:'kode_ruas', label:'Kode'}, {key:'nama_ruas', label:'Nama Ruas'}, {key:'kabupaten', label:'Kab/Kota'},
+  {key:'status_jalan', label:'Status'}, {key:'fungsi_jalan', label:'Fungsi'}, {key:'panjang_km', label:'Panjang'},
+  {key:'lebar_jalan_m', label:'Lebar'}, {key:'koordinat', label:'Koordinat'}, {key:'kondisi', label:'Kondisi'},
+  {key:'aksi', label:'Aksi', wajib:true},
+];
+const KEGIATAN_KOLOM = [
+  {key:'foto', label:'Foto'}, {key:'ruas', label:'Ruas'}, {key:'jenis_penanganan', label:'Jenis'},
+  {key:'sub_kegiatan', label:'Sub Kegiatan'}, {key:'tanggal_penanganan', label:'Tgl. Mulai'}, {key:'tanggal_selesai', label:'Tgl. Selesai'},
+  {key:'biaya', label:'Biaya'}, {key:'status_pekerjaan', label:'Status'}, {key:'link_dokumentasi', label:'Link Dokumentasi'},
+  {key:'aksi', label:'Aksi', wajib:true},
+];
+const JEMBATAN_KOLOM = [
+  {key:'nama_jembatan', label:'Nama Jembatan'}, {key:'ruas', label:'Ruas'}, {key:'sta_awal', label:'STA Awal'}, {key:'sta_akhir', label:'STA Akhir'},
+  {key:'panjang_m', label:'Panjang (m)'}, {key:'lebar_m', label:'Lebar (m)'}, {key:'jenis_konstruksi', label:'Konstruksi'},
+  {key:'kondisi', label:'Kondisi'}, {key:'tahun_dibangun', label:'Tahun'}, {key:'aksi', label:'Aksi', wajib:true},
+];
 
 // --- MODE OFFLINE: ANTREAN SURVEI KONDISI ----------------------------------
 // Petugas lapangan sering berada di area minim/tanpa sinyal. Kalau simpan
@@ -1262,6 +1445,10 @@ const ICONS = {
   collapse:'<path d="M11 17 6 12l5-5"/><path d="M18 17l-5-5 5-5"/>',
   expand:'<path d="M13 17l5-5-5-5"/><path d="M6 17l5-5-5-5"/>',
   chart:'<path d="M4 20V10M10 20V4M16 20v-7M4 20h16"/>',
+  sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/>',
+  moon:'<path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/>',
+  sliders:'<path d="M4 6h10M4 12h16M4 18h7"/><circle cx="17" cy="6" r="2" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="2" fill="currentColor" stroke="none"/>',
+  printer:'<path d="M6 9V3h12v6"/><rect x="4" y="9" width="16" height="8" rx="1.5"/><path d="M6 17v4h12v-4"/><circle cx="17" cy="12.5" r=".6" fill="currentColor" stroke="none"/>',
 };
 function actionBtns({onEdit, onDelete, onDetail}={}){
   let html = '<div class="flex items-center gap-1.5" onclick="event.stopPropagation()">';
@@ -1349,6 +1536,7 @@ function renderShell(){
         </div>
         <div class="flex-1"></div>
         <span id="conn-badge" class="hidden inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-white bg-[var(--bad)]/90 rounded-full px-2.5 py-1">${icon('wifioff','w-3.5 h-3.5')}Offline<span id="offline-badge" class="hidden ml-0.5 bg-white/25 rounded-full px-1.5">0</span></span>
+        <button id="theme-toggle" class="p-2 rounded-lg hover:bg-[#EEF1F6] text-ink-600" title="${state.theme==='gelap'?'Ganti ke mode terang':'Ganti ke mode gelap'}">${icon(state.theme==='gelap'?'sun':'moon','w-5 h-5')}</button>
         <div class="relative">
           <button id="btn-notif" class="relative p-2 rounded-lg hover:bg-[#EEF1F6] text-ink-600" title="Notifikasi">
             ${icon('bell','w-5 h-5')}
@@ -1373,6 +1561,7 @@ function renderShell(){
   if(overlay) overlay.addEventListener('click', ()=>{ state.mobileNavOpen=false; renderShell(); });
   updateConnBadge(); updateOfflineBadge();
   wireNotifBell();
+  document.getElementById('theme-toggle')?.addEventListener('click', ()=>{ toggleTema(); renderShell(); });
   routeView();
 }
 
@@ -2265,6 +2454,8 @@ async function viewRuas(){
       <select id="f-fungsi" class="max-w-[180px]"><option value="">Semua Fungsi</option><option value="arteri">Arteri</option><option value="kolektor">Kolektor</option><option value="lokal">Lokal</option></select>
       <select id="f-kondisi" class="max-w-[180px]"><option value="">Semua Kondisi</option>${KONDISI_ORDER.map(k=>`<option value="${k}">${KONDISI_LABEL[k]}</option>`).join('')}</select>
       <button id="f-reset" type="button" class="btn-ghost !py-1.5 !px-3 text-[12.5px]">Reset Filter</button>
+      <div class="flex-1"></div>
+      ${colPickerHtml('ruas')}
     </div>
     <!-- Pengembangan #9: export gabungan (ruas + kegiatan penanganan + anggaran)
          untuk satu kabupaten sekaligus, berguna untuk laporan ke kabupaten. -->
@@ -2274,9 +2465,9 @@ async function viewRuas(){
     </div>
     <div class="card overflow-x-auto">
       <table><thead><tr>
-        <th data-sort-key="kode_ruas">Kode</th><th data-sort-key="nama_ruas">Nama Ruas</th><th data-sort-key="kabupaten">Kab/Kota</th>
-        <th data-sort-key="status_jalan">Status</th><th data-sort-key="fungsi_jalan">Fungsi</th><th data-sort-key="panjang_km">Panjang</th>
-        <th data-sort-key="lebar_jalan_m">Lebar</th><th>Koordinat</th><th data-sort-key="kondisi">Kondisi</th>${isEditor()?'<th>Aksi</th>':''}
+        <th data-col="kode_ruas" data-sort-key="kode_ruas">Kode</th><th data-col="nama_ruas" data-sort-key="nama_ruas">Nama Ruas</th><th data-col="kabupaten" data-sort-key="kabupaten">Kab/Kota</th>
+        <th data-col="status_jalan" data-sort-key="status_jalan">Status</th><th data-col="fungsi_jalan" data-sort-key="fungsi_jalan">Fungsi</th><th data-col="panjang_km" data-sort-key="panjang_km">Panjang</th>
+        <th data-col="lebar_jalan_m" data-sort-key="lebar_jalan_m">Lebar</th><th data-col="koordinat">Koordinat</th><th data-col="kondisi" data-sort-key="kondisi">Kondisi</th>${isEditor()?'<th data-col="aksi" data-wajib>Aksi</th>':''}
       </tr></thead>
       <tbody id="ruas-tbody"></tbody></table>
     </div>
@@ -2298,6 +2489,7 @@ async function viewRuas(){
     // Usulan #7 & #10: state sortir kolom dan paginasi "muat lebih banyak" untuk tabel ini.
     const sortState = {key:null, dir:'asc'};
     const pageState = {shown:50, step:50};
+    const terapkanKolomRuas = setupColPicker('ruas', RUAS_KOLOM, pageState, ()=>renderRowsResetPage());
     function renderRows(){
       const q = document.getElementById('f-search').value.toLowerCase();
       const kab = document.getElementById('f-kabupaten').value;
@@ -2321,27 +2513,30 @@ async function viewRuas(){
       const totalRows = rows.length;
       const shownRows = rows.slice(0, pageState.shown);
       const tbody = document.getElementById('ruas-tbody');
-      tbody.innerHTML = shownRows.map(r=>`
-        <tr class="row-hover" data-id="${r.id}">
-          <td class="font-mono text-[12.5px] text-navy-700 font-semibold"><div class="flex items-center gap-1.5">${r.kode_ruas}${copyBtn(r.kode_ruas,'Salin kode ruas')}</div></td>
-          <td class="font-medium">${r.nama_ruas}</td>
-          <td class="text-ink-500">${r.kabupaten?.nama || '—'}</td>
-          <td class="capitalize text-ink-500">${r.status_jalan||'—'}</td>
-          <td class="capitalize text-ink-500">${r.fungsi_jalan||'—'}</td>
-          <td class="font-mono">${fmtNum(r.panjang_km,1)} km</td>
-          <td class="font-mono">${r.lebar_jalan_m!=null? fmtNum(r.lebar_jalan_m,1)+' m' : '—'}</td>
-          <td class="font-mono text-[11.5px]">
+      tbody.innerHTML = shownRows.map(r=>{
+        const baru = baruDiubahSejakJam(r);
+        return `
+        <tr class="row-hover ${baru?'row-baru-diubah':''}" data-id="${r.id}">
+          <td data-col="kode_ruas" class="font-mono text-[12.5px] text-navy-700 font-semibold"><div class="flex items-center gap-1.5">${r.kode_ruas}${copyBtn(r.kode_ruas,'Salin kode ruas')}${badgeBaru(r)}</div></td>
+          <td data-col="nama_ruas" class="font-medium">${r.nama_ruas}</td>
+          <td data-col="kabupaten" class="text-ink-500">${r.kabupaten?.nama || '—'}</td>
+          <td data-col="status_jalan" class="capitalize text-ink-500">${r.status_jalan||'—'}</td>
+          <td data-col="fungsi_jalan" class="capitalize text-ink-500">${r.fungsi_jalan||'—'}</td>
+          <td data-col="panjang_km" class="font-mono">${fmtNum(r.panjang_km,1)} km</td>
+          <td data-col="lebar_jalan_m" class="font-mono">${r.lebar_jalan_m!=null? fmtNum(r.lebar_jalan_m,1)+' m' : '—'}</td>
+          <td data-col="koordinat" class="font-mono text-[11.5px]">
             <div class="flex items-center gap-2.5">
               ${(r.lat_awal!=null && r.long_awal!=null)? `<a href="https://www.google.com/maps?q=${r.lat_awal},${r.long_awal}" target="_blank" title="Titik Awal: ${fmtNum(r.lat_awal,6)}, ${fmtNum(r.long_awal,6)}" class="text-emerald-600 hover:text-emerald-700" onclick="event.stopPropagation()">${icon('pin','w-4 h-4')}</a>${copyBtn(`${r.lat_awal},${r.long_awal}`,'Salin koordinat titik awal')}` : ''}
               ${(r.lat_akhir!=null && r.long_akhir!=null)? `<a href="https://www.google.com/maps?q=${r.lat_akhir},${r.long_akhir}" target="_blank" title="Titik Akhir: ${fmtNum(r.lat_akhir,6)}, ${fmtNum(r.long_akhir,6)}" class="text-rose-600 hover:text-rose-700" onclick="event.stopPropagation()">${icon('flag','w-4 h-4')}</a>${copyBtn(`${r.lat_akhir},${r.long_akhir}`,'Salin koordinat titik akhir')}` : ''}
               ${(r.lat_awal==null && r.lat_akhir==null)? '<span class="text-ink-400">—</span>' : ''}
             </div>
           </td>
-          <td>${badge(worstByRuas[r.id])}</td>
-          ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
-        </tr>`).join('');
+          <td data-col="kondisi">${badge(worstByRuas[r.id])}</td>
+          ${isEditor()?`<td data-col="aksi">${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
+        </tr>`;}).join('');
       document.getElementById('ruas-empty').classList.toggle('hidden', totalRows>0);
       renderLoadMoreBtn(document.getElementById('ruas-loadmore'), totalRows, pageState, renderRows);
+      terapkanKolomRuas(document.getElementById('ruas-tbody').closest('table'));
       tbody.querySelectorAll('tr').forEach(tr=>{
         tr.addEventListener('click', ()=>{ state.selectedRuasId = tr.dataset.id; renderShell(); });
         tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>{
@@ -2385,13 +2580,18 @@ async function viewRuasDetail(id){
     state.ruasCache = ruasAll;
     v.innerHTML = `
     <button id="back-ruas" class="btn-ghost !py-1.5 !px-3 text-[12.5px] mb-4">← Kembali ke daftar ruas</button>
+    <div class="print-title mb-4">
+      <div class="font-display font-extrabold text-lg">SIJALAN — Lembar Ruas Jalan</div>
+      <div class="text-[12px] text-ink-500">Dicetak: ${fmtDate(new Date().toISOString())}</div>
+    </div>
     <div class="flex items-start justify-between flex-wrap gap-3 mb-6">
       <div>
         <div class="flex items-center gap-1.5"><span class="font-mono text-navy-700 font-bold text-[13px]">${ruas.kode_ruas}</span>${copyBtn(ruas.kode_ruas,'Salin kode ruas')}</div>
         <h1 class="font-display font-extrabold text-2xl text-ink-900 mt-0.5">${ruas.nama_ruas}</h1>
         <p class="text-ink-500 text-[13.5px] mt-1">${ruas.kabupaten?.nama||'—'} · <span class="capitalize">${ruas.status_jalan||'—'}</span> · ${ruas.fungsi_jalan? 'Fungsi '+ruas.fungsi_jalan : ''} · ${fmtNum(ruas.panjang_km,1)} km${ruas.lebar_jalan_m!=null? ' · Lebar '+fmtNum(ruas.lebar_jalan_m,1)+' m' : ''}</p>
       </div>
-      <div class="flex gap-2 flex-wrap">
+      <div class="flex gap-2 flex-wrap no-print">
+        <button id="btn-cetak-ruas" class="btn-ghost !py-2 !px-3 text-[12.5px]">${icon('printer','w-3.5 h-3.5')} Cetak</button>
         <button id="btn-export-laporan-ruas" class="btn-ghost !py-2 !px-3 text-[12.5px]">${icon('doc','w-3.5 h-3.5')} Laporan PDF</button>
         ${isEditor()?`<button id="btn-add-lalin-ruas" class="btn-ghost">+ Data Lalu Lintas</button><button id="btn-add-survei" class="btn-ghost">+ Survei Kondisi</button><button id="btn-add-kegiatan" class="btn-primary">+ Kegiatan Penanganan</button>`:''}
       </div>
@@ -2504,6 +2704,7 @@ async function viewRuasDetail(id){
     </div>`;
     document.getElementById('back-ruas').addEventListener('click', ()=>{ state.selectedRuasId=null; renderShell(); });
     document.getElementById('btn-export-laporan-ruas').addEventListener('click', ()=>exportLaporanRuasPdf(ruas, segmen, kegiatan, survei, anggaran, bencana));
+    document.getElementById('btn-cetak-ruas').addEventListener('click', ()=>cetakHalaman());
     hydrateFotoThumbs(document.getElementById('kegiatan-list'));
     hydrateFotoThumbs(document.getElementById('survei-list'));
     if(isEditor()){
@@ -3063,6 +3264,8 @@ function openKegiatanFormModal(ruasList, defaultRuas, editData=null, onSaved=nul
 function openKegiatanDetailModal(kg){
   const overlay = openModal(`
     <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
+    <button data-cetak-kegiatan class="no-print absolute top-4 right-12 text-ink-400 hover:text-navy-700" title="Cetak">${icon('printer','w-[18px] h-[18px]')}</button>
+    <div class="print-title mb-2"><div class="font-display font-extrabold text-base">SIJALAN — Lembar Kegiatan Penanganan</div></div>
     <h3 class="font-display font-extrabold text-lg mb-1 capitalize">${(kg.jenis_penanganan||'—').replaceAll('_',' ')}</h3>
     <p class="text-[13px] text-ink-500 mb-4">${kg.kode_ruas} · ${kg.nama_ruas} · ${fmtDate(kg.tanggal_penanganan)}${kg.tanggal_selesai? ' – '+fmtDate(kg.tanggal_selesai) : ''}</p>
     <div class="grid grid-cols-2 gap-3 text-[13px] mb-4">
@@ -3093,6 +3296,7 @@ function openKegiatanDetailModal(kg){
   `);
   overlay.querySelector('div.card').classList.add('!max-w-2xl');
   overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+  overlay.querySelector('[data-cetak-kegiatan]').addEventListener('click', ()=>cetakModal());
   hydrateFotoThumbs(overlay);
 
   api.dokumenMatrix(kg.id).then(rows=>{
@@ -3299,12 +3503,14 @@ async function viewKegiatan(){
         <span>s/d</span><input id="fk-tgl-sampai" type="date" class="max-w-[150px]">
       </div>
       <button id="fk-reset" class="btn-ghost !py-1.5 !px-3 text-[12.5px]">Reset Filter</button>
+      <div class="flex-1"></div>
+      ${colPickerHtml('kegiatan')}
     </div>
     <div class="card overflow-x-auto">
       <table><thead><tr>
-        <th>Foto</th><th data-sort-key="ruas">Ruas</th><th data-sort-key="jenis_penanganan">Jenis</th><th data-sort-key="sub_kegiatan">Sub Kegiatan</th>
-        <th data-sort-key="tanggal_penanganan">Tgl. Mulai</th><th data-sort-key="tanggal_selesai">Tgl. Selesai</th><th data-sort-key="biaya">Biaya</th>
-        <th data-sort-key="status_pekerjaan">Status</th><th>Link Dokumentasi</th>${isEditor()?'<th>Aksi</th>':''}
+        <th data-col="foto">Foto</th><th data-col="ruas" data-sort-key="ruas">Ruas</th><th data-col="jenis_penanganan" data-sort-key="jenis_penanganan">Jenis</th><th data-col="sub_kegiatan" data-sort-key="sub_kegiatan">Sub Kegiatan</th>
+        <th data-col="tanggal_penanganan" data-sort-key="tanggal_penanganan">Tgl. Mulai</th><th data-col="tanggal_selesai" data-sort-key="tanggal_selesai">Tgl. Selesai</th><th data-col="biaya" data-sort-key="biaya">Biaya</th>
+        <th data-col="status_pekerjaan" data-sort-key="status_pekerjaan">Status</th><th data-col="link_dokumentasi">Link Dokumentasi</th>${isEditor()?'<th data-col="aksi" data-wajib>Aksi</th>':''}
       </tr></thead>
       <tbody id="kegiatan-tbody"></tbody></table>
     </div>
@@ -3314,6 +3520,7 @@ async function viewKegiatan(){
     // Usulan #7 & #10: state sortir kolom dan paginasi "muat lebih banyak" untuk tabel ini.
     const sortState = {key:null, dir:'asc'};
     const pageState = {shown:50, step:50};
+    const terapkanKolomKegiatan = setupColPicker('kegiatan', KEGIATAN_KOLOM, pageState, ()=>renderRowsResetPage());
     function renderRows(){
       const q = document.getElementById('fk-search').value.toLowerCase();
       const kab = document.getElementById('fk-kabupaten').value;
@@ -3344,23 +3551,25 @@ async function viewKegiatan(){
       tbody.innerHTML = shownRows.map(k=>{
         const lewat = isLewatTenggat(k.tanggal_selesai, k.status_pekerjaan);
         const jumlahDokKurang = dokKurangById[k.id] || 0;
-        const rowCls = lewat ? 'row-lewat-tenggat' : (jumlahDokKurang>0 ? 'row-dok-kurang' : '');
+        const baru = !lewat && jumlahDokKurang<=0 && baruDiubahSejakJam(k);
+        const rowCls = lewat ? 'row-lewat-tenggat' : (jumlahDokKurang>0 ? 'row-dok-kurang' : (baru ? 'row-baru-diubah' : ''));
         return `
         <tr class="row-hover ${rowCls}" data-id="${k.id}">
-          <td>${fotoThumbHtml(k.foto_awal_path || k.foto_akhir_path)}</td>
-          <td><div class="flex items-center gap-1.5"><span class="font-mono text-[12px] text-navy-700 font-semibold">${k.kode_ruas}</span>${copyBtn(k.kode_ruas,'Salin kode ruas')}</div><div class="text-[12.5px]">${k.nama_ruas}</div></td>
-          <td class="capitalize">${(k.jenis_penanganan||'—').replaceAll('_',' ')}${k.kejadian_bencana_id?` <span class="text-[var(--bad)]" title="Menangani kejadian bencana: ${(k.bencana_jenis_kejadian||'—').replaceAll('_',' ')} · ${fmtDate(k.bencana_tanggal_kejadian)}">⚠</span>`:''}</td>
-          <td class="text-ink-500 text-[12.5px] max-w-[220px] truncate">${k.sub_kegiatan||'—'}</td>
-          <td class="font-mono text-[12.5px]">${fmtDate(k.tanggal_penanganan)}</td>
-          <td class="font-mono text-[12.5px]">${k.tanggal_selesai? fmtDate(k.tanggal_selesai) : '—'}${lewat?` <span class="text-[var(--bad)]" title="Sudah lewat target penyelesaian">⚠</span>`:''}</td>
-          <td class="font-mono text-[12.5px]">${fmtRp(k.biaya)}</td>
-          <td><span class="badge ${k.status_pekerjaan==='selesai'?'badge-baik':k.status_pekerjaan==='terhenti'?'badge-rusak_berat':'badge-sedang'} capitalize">${(k.status_pekerjaan||'—').replaceAll('_',' ')}</span>${jumlahDokKurang>0?` <span class="text-[var(--fair)]" title="${jumlahDokKurang} dokumen wajib belum lengkap">${icon('doc','w-3.5 h-3.5 inline -mt-0.5')}</span>`:''}</td>
-          <td class="max-w-[160px]">${k.link_dokumentasi?`<a href="${k.link_dokumentasi}" target="_blank" rel="noopener" data-stop-row class="text-navy-700 underline text-[12.5px] truncate block">Buka Link</a>`:'<span class="text-ink-400 text-[12.5px]">—</span>'}</td>
-          ${isEditor()?`<td>${actionBtns({onDetail:true, onEdit:true, onDelete:isAdmin()})}</td>`:''}
+          <td data-col="foto">${fotoThumbHtml(k.foto_awal_path || k.foto_akhir_path)}</td>
+          <td data-col="ruas"><div class="flex items-center gap-1.5"><span class="font-mono text-[12px] text-navy-700 font-semibold">${k.kode_ruas}</span>${copyBtn(k.kode_ruas,'Salin kode ruas')}</div><div class="text-[12.5px]">${k.nama_ruas}${baru?badgeBaru(k):''}</div></td>
+          <td data-col="jenis_penanganan" class="capitalize">${(k.jenis_penanganan||'—').replaceAll('_',' ')}${k.kejadian_bencana_id?` <span class="text-[var(--bad)]" title="Menangani kejadian bencana: ${(k.bencana_jenis_kejadian||'—').replaceAll('_',' ')} · ${fmtDate(k.bencana_tanggal_kejadian)}">⚠</span>`:''}</td>
+          <td data-col="sub_kegiatan" class="text-ink-500 text-[12.5px] max-w-[220px] truncate">${k.sub_kegiatan||'—'}</td>
+          <td data-col="tanggal_penanganan" class="font-mono text-[12.5px]">${fmtDate(k.tanggal_penanganan)}</td>
+          <td data-col="tanggal_selesai" class="font-mono text-[12.5px]">${k.tanggal_selesai? fmtDate(k.tanggal_selesai) : '—'}${lewat?` <span class="text-[var(--bad)]" title="Sudah lewat target penyelesaian">⚠</span>`:''}</td>
+          <td data-col="biaya" class="font-mono text-[12.5px]">${fmtRp(k.biaya)}</td>
+          <td data-col="status_pekerjaan"><span class="badge ${k.status_pekerjaan==='selesai'?'badge-baik':k.status_pekerjaan==='terhenti'?'badge-rusak_berat':'badge-sedang'} capitalize">${(k.status_pekerjaan||'—').replaceAll('_',' ')}</span>${jumlahDokKurang>0?` <span class="text-[var(--fair)]" title="${jumlahDokKurang} dokumen wajib belum lengkap">${icon('doc','w-3.5 h-3.5 inline -mt-0.5')}</span>`:''}</td>
+          <td data-col="link_dokumentasi" class="max-w-[160px]">${k.link_dokumentasi?`<a href="${k.link_dokumentasi}" target="_blank" rel="noopener" data-stop-row class="text-navy-700 underline text-[12.5px] truncate block">Buka Link</a>`:'<span class="text-ink-400 text-[12.5px]">—</span>'}</td>
+          ${isEditor()?`<td data-col="aksi">${actionBtns({onDetail:true, onEdit:true, onDelete:isAdmin()})}</td>`:''}
         </tr>`;
       }).join('');
       document.getElementById('kegiatan-empty').classList.toggle('hidden', totalRows>0);
       renderLoadMoreBtn(document.getElementById('kegiatan-loadmore'), totalRows, pageState, renderRows);
+      terapkanKolomKegiatan(document.getElementById('kegiatan-tbody').closest('table'));
       hydrateFotoThumbs(tbody);
       tbody.querySelectorAll('tr').forEach(tr=>{
         const kg = kegiatan.find(k=>k.id===tr.dataset.id);
@@ -3638,9 +3847,10 @@ async function viewPenugasan(){
       tbody.innerHTML = shownRows.map(p=>{
         const canUpdateStatus = isPenugas() || (p.petugas_ids||[]).includes(state.user.id);
         const lewat = isLewatTenggat(p.target_tanggal, p.status);
+        const baru = !lewat && baruDiubahSejakJam(p);
         return `
-        <tr data-id="${p.id}" class="${lewat?'row-lewat-tenggat':''}">
-          <td class="font-medium">${p.kode_ruas? `<span class="inline-flex items-center gap-1"><span class="font-mono text-[12px] text-navy-700 font-semibold">${p.kode_ruas}</span>${copyBtn(p.kode_ruas,'Salin kode ruas')}</span> · `:''}${p.nama_ruas}</td>
+        <tr data-id="${p.id}" class="${lewat?'row-lewat-tenggat':(baru?'row-baru-diubah':'')}">
+          <td class="font-medium">${p.kode_ruas? `<span class="inline-flex items-center gap-1"><span class="font-mono text-[12px] text-navy-700 font-semibold">${p.kode_ruas}</span>${copyBtn(p.kode_ruas,'Salin kode ruas')}</span> · `:''}${p.nama_ruas}${baru?badgeBaru(p):''}</td>
           <td class="text-ink-500">${p.kabupaten||'—'}</td>
           <td>${p.nama_petugas}</td>
           <td class="font-mono text-[12.5px]">${p.target_tanggal? fmtDate(p.target_tanggal) : '—'}${lewat?` <span class="text-[var(--bad)]" title="Sudah lewat tenggat">⚠</span>`:''}</td>
@@ -3839,10 +4049,13 @@ async function renderJembatanTab(){
         <select id="fj-kondisi" class="max-w-[180px]"><option value="">Semua Kondisi</option>${KONDISI_ORDER.map(k=>`<option value="${k}">${KONDISI_LABEL[k]}</option>`).join('')}</select>
         <button id="fj-reset" type="button" class="btn-ghost !py-1.5 !px-3 text-[12.5px]">Reset Filter</button>
       </div>
-      ${isEditor()?`<button id="btn-add-jembatan" class="btn-accent">+ Tambah Jembatan</button>`:''}
+      <div class="flex items-center gap-2">
+        ${colPickerHtml('jembatan')}
+        ${isEditor()?`<button id="btn-add-jembatan" class="btn-accent">+ Tambah Jembatan</button>`:''}
+      </div>
     </div>
     <div class="card overflow-x-auto">
-      <table><thead><tr><th data-sort-key="nama_jembatan">Nama Jembatan</th><th data-sort-key="ruas">Ruas</th><th data-sort-key="sta_awal">STA Awal</th><th data-sort-key="sta_akhir">STA Akhir</th><th data-sort-key="panjang_m">Panjang (m)</th><th data-sort-key="lebar_m">Lebar (m)</th><th data-sort-key="jenis_konstruksi">Konstruksi</th><th data-sort-key="kondisi">Kondisi</th><th data-sort-key="tahun_dibangun">Tahun</th>${isEditor()?'<th></th>':''}</tr></thead>
+      <table><thead><tr><th data-col="nama_jembatan" data-sort-key="nama_jembatan">Nama Jembatan</th><th data-col="ruas" data-sort-key="ruas">Ruas</th><th data-col="sta_awal" data-sort-key="sta_awal">STA Awal</th><th data-col="sta_akhir" data-sort-key="sta_akhir">STA Akhir</th><th data-col="panjang_m" data-sort-key="panjang_m">Panjang (m)</th><th data-col="lebar_m" data-sort-key="lebar_m">Lebar (m)</th><th data-col="jenis_konstruksi" data-sort-key="jenis_konstruksi">Konstruksi</th><th data-col="kondisi" data-sort-key="kondisi">Kondisi</th><th data-col="tahun_dibangun" data-sort-key="tahun_dibangun">Tahun</th>${isEditor()?'<th data-col="aksi" data-wajib></th>':''}</tr></thead>
       <tbody id="jembatan-tbody"></tbody></table>
     </div>
     <div id="jembatan-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada data yang cocok dengan filter.</div>
@@ -3851,6 +4064,7 @@ async function renderJembatanTab(){
     // Usulan #7 & #10: state sortir kolom dan paginasi "muat lebih banyak" untuk tabel ini.
     const sortState = {key:null, dir:'asc'};
     const pageState = {shown:50, step:50};
+    const terapkanKolomJembatan = setupColPicker('jembatan', JEMBATAN_KOLOM, pageState, ()=>renderRowsResetPage());
     function renderRows(){
       const q = document.getElementById('fj-search').value.toLowerCase();
       const kd = document.getElementById('fj-kondisi').value;
@@ -3868,23 +4082,26 @@ async function renderJembatanTab(){
       });
       const totalRows = rows.length;
       const shownRows = rows.slice(0, pageState.shown);
-      document.getElementById('jembatan-tbody').innerHTML = shownRows.map(j=>`
-        <tr data-id="${j.id}">
-          <td class="font-medium">${j.nama_jembatan}</td>
-          <td>${j.ruas_jalan?`${j.ruas_jalan.kode_ruas} — ${j.ruas_jalan.nama_ruas}`:'—'}</td>
-          <td class="font-mono">${j.sta_awal!=null?fmtNum(j.sta_awal,3):'—'}</td>
-          <td class="font-mono">${j.sta_akhir!=null?fmtNum(j.sta_akhir,3):'—'}</td>
-          <td class="font-mono">${fmtNum(j.panjang_m,1)}</td>
-          <td class="font-mono">${fmtNum(j.lebar_m,1)}</td>
-          <td>${j.jenis_konstruksi||'—'}</td>
-          <td>${badge(j.kondisi)}</td>
-          <td class="font-mono">${j.tahun_dibangun||'—'}</td>
-          ${isEditor()?`<td>${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
-        </tr>`).join('');
+      document.getElementById('jembatan-tbody').innerHTML = shownRows.map(j=>{
+        const baru = baruDiubahSejakJam(j);
+        return `
+        <tr data-id="${j.id}" class="${baru?'row-baru-diubah':''}">
+          <td data-col="nama_jembatan" class="font-medium">${j.nama_jembatan}${badgeBaru(j)}</td>
+          <td data-col="ruas">${j.ruas_jalan?`${j.ruas_jalan.kode_ruas} — ${j.ruas_jalan.nama_ruas}`:'—'}</td>
+          <td data-col="sta_awal" class="font-mono">${j.sta_awal!=null?fmtNum(j.sta_awal,3):'—'}</td>
+          <td data-col="sta_akhir" class="font-mono">${j.sta_akhir!=null?fmtNum(j.sta_akhir,3):'—'}</td>
+          <td data-col="panjang_m" class="font-mono">${fmtNum(j.panjang_m,1)}</td>
+          <td data-col="lebar_m" class="font-mono">${fmtNum(j.lebar_m,1)}</td>
+          <td data-col="jenis_konstruksi">${j.jenis_konstruksi||'—'}</td>
+          <td data-col="kondisi">${badge(j.kondisi)}</td>
+          <td data-col="tahun_dibangun" class="font-mono">${j.tahun_dibangun||'—'}</td>
+          ${isEditor()?`<td data-col="aksi">${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}
+        </tr>`;}).join('');
       document.getElementById('jembatan-empty').classList.toggle('hidden', totalRows>0 || data.length===0);
       const tbody = document.getElementById('jembatan-tbody');
       if(data.length===0) tbody.innerHTML = `<tr><td colspan="10" class="text-center text-ink-400 py-8">Belum ada data jembatan.</td></tr>`;
       renderLoadMoreBtn(document.getElementById('jembatan-loadmore'), totalRows, pageState, renderRows);
+      terapkanKolomJembatan(tbody.closest('table'));
       tbody.querySelectorAll('tr[data-id]').forEach(tr=>{
         const j = data.find(x=>x.id===tr.dataset.id);
         tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openJembatanFormModal(ruas, j, renderJembatanTab));
