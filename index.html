@@ -218,7 +218,19 @@
     }
     #item-pekerjaan-list th{
       text-transform:none !important; letter-spacing:0 !important; font-size:10px !important;
+      text-align:center !important;
     }
+
+    /* Perbaikan tambahan: tabel "Data Kontrak & Konsultan" (13 baris info
+       paket) terpotong jadi 2 bagian saat dicetak — sebuah baris <tr> pecah
+       melintasi batas halaman, bukan pindah utuh ke halaman berikutnya.
+       break-inside:avoid pada setiap baris + wadahnya memaksa browser
+       memindah seluruh blok (atau minimal seluruh baris) ke halaman baru
+       alih-alih memotongnya di tengah. */
+    #kontrak-info{ break-inside:avoid; page-break-inside:avoid; }
+    #kontrak-info table{ border-collapse:collapse !important; }
+    #kontrak-info tr{ break-inside:avoid; page-break-inside:avoid; }
+    #kontrak-info td{ border:1px solid #ccc !important; }
   }
   .print-title{ display:none; }
 </style>
@@ -3945,6 +3957,10 @@ function openKontrakFormModal(penangananId, onSaved){
 // Spek BM 2018 Rev.2, dengan baris rincian per Segmen/STA bersarang di bawah
 // tiap Mata Pembayaran dan baris "Total Panjang" di akhir tiap item — meniru
 // susunan lembar Backup Data lapangan (lihat contoh format kertas).
+// Catatan: "Segmen" BUKAN kolom tersendiri — nama segmen ditampilkan di
+// dalam kolom "Uraian Pekerjaan" (mis. "- Segmen I"), hanya pada baris
+// rincian pertama tiap kelompok segmen, persis seperti lembar Backup Data
+// kertas. Ini membuat tabel lebih ramping saat dicetak potret.
 function renderItemPekerjaanList(overlay, kg){
   const box = overlay.querySelector('#item-pekerjaan-list');
   if(!box) return;
@@ -3966,20 +3982,33 @@ function renderItemPekerjaanList(overlay, kg){
     let lastDivisi;
     let firstGroup = true;
     const bodyRows = [];
+    // Total kolom data tabel (tanpa kolom aksi): No, Mata Pembayaran, Uraian
+    // Pekerjaan, Sat, Vol.ADD, Vol.Terpasang, STA Awal, s.d., STA Akhir,
+    // Panjang (M), Posisi = 11 kolom. "Segmen" TIDAK lagi jadi kolom sendiri
+    // (lihat catatan di bawah) — kolom aksi (edit/hapus) menambah 1 kolom
+    // khusus untuk editor.
+    const totalKolom = isEditor() ? 12 : 11;
     items.forEach(it=>{
       const rows = detailMap[it.id] || [];
       if(it.divisi_nomor !== lastDivisi){
         lastDivisi = it.divisi_nomor;
-        bodyRows.push(`<tr class="bg-navy-50/70"${firstGroup?'':' '}><td colspan="${isEditor()?13:12}" class="py-1.5 px-2 font-display font-bold text-[12.5px] text-navy-800 border-t border-line">${it.divisi_nomor?`DIVISI ${it.divisi_nomor} — ${(it.divisi_nama||'').toUpperCase()}`:'TANPA REFERENSI DIVISI'}</td></tr>`);
+        bodyRows.push(`<tr class="bg-navy-50/70"${firstGroup?'':' '}><td colspan="${totalKolom}" class="py-1.5 px-2 font-display font-bold text-[12.5px] text-navy-800 border-t border-line">${it.divisi_nomor?`DIVISI ${it.divisi_nomor} — ${(it.divisi_nama||'').toUpperCase()}`:'TANPA REFERENSI DIVISI'}</td></tr>`);
         firstGroup = false;
       }
       no++;
       const hasRows = rows.length > 0;
-      // Kolom label (No/Mata Pembayaran/Uraian/Sat) dibuat menyatu (rowspan)
-      // sampai ke baris ringkasan "Total Panjang" di bagian bawah, supaya
-      // baris ringkasan tetap sejajar lurus dengan kolom "Panjang (M)" —
-      // sebelumnya rowspan berhenti sebelum baris ringkasan, sehingga sel
-      // ringkasan ikut bergeser ke kolom yang salah.
+      // Kolom label (No/Mata Pembayaran/Sat) dibuat menyatu (rowspan) sampai
+      // ke baris ringkasan "Total Panjang" di bagian bawah, supaya baris
+      // ringkasan tetap sejajar lurus dengan kolom "Panjang (M)".
+      // Catatan: kolom "Uraian Pekerjaan" SENGAJA TIDAK ikut menyatu (rowspan)
+      // lagi seperti sebelumnya — kolom "Segmen" yang tadinya terpisah kini
+      // digabung ke dalam kolom Uraian Pekerjaan (meniru format kertas
+      // Backup Data): baris pertama menampilkan nama pekerjaan, lalu setiap
+      // kali nama segmen berubah pada baris rincian STA berikutnya, nama
+      // segmen itu ditampilkan (mis. "- Segmen I") pada kolom Uraian
+      // Pekerjaan di baris tersebut; baris rincian dengan segmen yang sama
+      // dibiarkan kosong pada kolom ini. Ini menghilangkan satu kolom penuh
+      // dari tabel sehingga muat lebih rapi saat dicetak potret.
       const labelRowspan = hasRows ? rows.length + 1 : 1;
       // Kolom Vol. ADD & Vol. Terpasang HANYA menyatu untuk baris rincian STA
       // (tidak sampai ke baris ringkasan), karena baris ringkasan memakai
@@ -3987,29 +4016,51 @@ function renderItemPekerjaanList(overlay, kg){
       // Progres % tampil di ringkasan, sejajar seperti "Total Panjang".
       const volRowspan = hasRows ? rows.length : 1;
       const totalPanjang = rows.reduce((s,r)=>s+(Number(r.panjang_m)||0), 0);
-      const labelCells = `
+      const noMataCells = `
         <td rowspan="${labelRowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono">${no}</td>
-        <td rowspan="${labelRowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono whitespace-nowrap">${it.kode_mata_pembayaran}</td>
-        <td rowspan="${labelRowspan}" class="py-1.5 px-2 align-top border-t border-line font-medium min-w-[160px]">${it.uraian_pekerjaan}${it.nama_seksi?`<div class="text-[11px] text-ink-400 font-normal mt-0.5">Seksi ${it.kode_seksi||''} ${it.nama_seksi}</div>`:''}${isEditor()?`<div class="no-print flex gap-2 mt-1.5">
-            <button data-edit-item="${it.id}" class="text-ink-400 hover:text-navy-700" title="Ubah item">${icon('edit','w-3.5 h-3.5')}</button>
-            <button data-hapus-item="${it.id}" class="text-ink-400 hover:text-[var(--bad)]" title="Hapus item">${icon('trash','w-3.5 h-3.5')}</button>
-            <button data-tambah-detail="${it.id}" class="text-navy-700 font-semibold underline text-[11px]" title="Tambah baris STA">+ Baris STA</button>
-          </div>`:''}</td>
-        <td rowspan="${labelRowspan}" class="py-1.5 px-2 align-top border-t border-line">${it.satuan}</td>`;
+        <td rowspan="${labelRowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono whitespace-nowrap">${it.kode_mata_pembayaran}</td>`;
+      const satCell = `<td rowspan="${labelRowspan}" class="py-1.5 px-2 align-top border-t border-line">${it.satuan}</td>`;
       const volCells = `
         <td rowspan="${volRowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_add,2,true)}</td>
         <td rowspan="${volRowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_terpasang,2,true)}</td>`;
-      const firstCells = labelCells + volCells;
-      if(!rows.length){
-        bodyRows.push(`<tr>${firstCells}
-          <td class="py-1.5 px-2 border-t border-line text-ink-400 text-center" colspan="6">— belum ada rincian STA —</td>
+      // Sel Uraian Pekerjaan untuk baris pertama item: nama pekerjaan + seksi
+      // + tombol aksi, ditambah nama segmen (jika ada) di baris rincian
+      // pertama.
+      function uraianTd(extraContent){
+        return `<td class="py-1.5 px-2 align-top border-t border-line font-medium min-w-[150px]">${extraContent}</td>`;
+      }
+      const uraianItemHtml = `${it.uraian_pekerjaan}${it.nama_seksi?`<div class="text-[11px] text-ink-400 font-normal mt-0.5">Seksi ${it.kode_seksi||''} ${it.nama_seksi}</div>`:''}${isEditor()?`<div class="no-print flex gap-2 mt-1.5">
+            <button data-edit-item="${it.id}" class="text-ink-400 hover:text-navy-700" title="Ubah item">${icon('edit','w-3.5 h-3.5')}</button>
+            <button data-hapus-item="${it.id}" class="text-ink-400 hover:text-[var(--bad)]" title="Hapus item">${icon('trash','w-3.5 h-3.5')}</button>
+            <button data-tambah-detail="${it.id}" class="text-navy-700 font-semibold underline text-[11px]" title="Tambah baris STA">+ Baris STA</button>
+          </div>`:''}`;
+      if(!hasRows){
+        bodyRows.push(`<tr>
+          ${noMataCells}
+          ${uraianTd(uraianItemHtml)}
+          ${satCell}
+          ${volCells}
+          <td class="py-1.5 px-2 border-t border-line text-ink-400 text-center" colspan="5">— belum ada rincian STA —</td>
           ${isEditor()?`<td class="py-1.5 px-2 border-t border-line no-print"></td>`:''}
         </tr>`);
       } else {
+        let segmenSebelumnya = null;
         rows.forEach((r,i)=>{
+          const segmenBerubah = (r.nama_segmen||'') !== segmenSebelumnya;
+          segmenSebelumnya = r.nama_segmen||'';
+          let isiUraian;
+          if(i===0){
+            isiUraian = uraianItemHtml + (r.nama_segmen? `<div class="italic text-ink-500 mt-1">- ${r.nama_segmen}</div>` : '');
+          } else if(segmenBerubah && r.nama_segmen){
+            isiUraian = `<div class="italic text-ink-500">- ${r.nama_segmen}</div>`;
+          } else {
+            isiUraian = '';
+          }
           bodyRows.push(`<tr data-detail-id="${r.id}">
-            ${i===0?firstCells:''}
-            <td class="py-1.5 px-2 border-t border-line whitespace-nowrap">${r.nama_segmen||'—'}</td>
+            ${i===0?noMataCells:''}
+            ${uraianTd(isiUraian)}
+            ${i===0?satCell:''}
+            ${i===0?volCells:''}
             <td class="py-1.5 px-2 border-t border-line font-mono whitespace-nowrap">${r.sta_awal}</td>
             <td class="py-1.5 px-2 border-t border-line text-center text-ink-400">s.d.</td>
             <td class="py-1.5 px-2 border-t border-line font-mono whitespace-nowrap">${r.sta_akhir}</td>
@@ -4021,13 +4072,15 @@ function renderItemPekerjaanList(overlay, kg){
             </td>`:''}
           </tr>`);
         });
-        // Baris ringkasan: Progres % ditampilkan sejajar di bawah kolom
-        // Vol. Terpasang, dan Total Panjang sejajar lurus di bawah kolom
-        // Panjang (M) — keduanya sebagai satu baris ringkasan per item.
+        // Baris ringkasan: kolom Uraian Pekerjaan kosong (karena kolom ini
+        // tak lagi menyatu/rowspan), Progres % ditampilkan sejajar di bawah
+        // kolom Vol. Terpasang, dan Total Panjang sejajar lurus di bawah
+        // kolom Panjang (M).
         bodyRows.push(`<tr class="bg-ink-50 font-semibold">
           <td class="py-1 px-2 border-t border-line"></td>
+          <td class="py-1 px-2 border-t border-line"></td>
           <td class="py-1 px-2 border-t border-line font-mono text-right whitespace-nowrap">${it.persen_progres!=null?'Progres '+fmtNum(it.persen_progres,2,true)+'%':'—'}</td>
-          <td class="py-1 px-2 border-t border-line text-right" colspan="4">Total Panjang</td>
+          <td class="py-1 px-2 border-t border-line text-right" colspan="3">Total Panjang</td>
           <td class="py-1 px-2 border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(totalPanjang,2,true)}</td>
           <td class="py-1 px-2 border-t border-line"></td>
           ${isEditor()?`<td class="py-1 px-2 border-t border-line no-print"></td>`:''}
@@ -4039,20 +4092,19 @@ function renderItemPekerjaanList(overlay, kg){
       <div class="overflow-x-auto -mx-1 border border-line rounded-xl">
         <table class="w-full text-[12px] border-collapse min-w-[860px]">
           <thead>
-            <tr class="text-ink-500 text-left bg-ink-50">
+            <tr class="text-ink-500 text-center bg-ink-50">
               <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">No</th>
-              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">Mata Pembayaran</th>
-              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">Uraian Pekerjaan</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">Mata<br>Pembayaran</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line text-left">Uraian Pekerjaan</th>
               <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">Sat</th>
-              <th rowspan="2" class="py-1.5 px-2 font-semibold text-right align-bottom border-b border-line">Vol. ADD</th>
-              <th rowspan="2" class="py-1.5 px-2 font-semibold text-right align-bottom border-b border-line">Vol. Terpasang</th>
-              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line whitespace-nowrap">Segmen</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">Volume<br>ADD</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">Volume<br>Terpasang</th>
               <th colspan="3" class="py-1 px-2 font-semibold text-center border-b border-line">STA</th>
-              <th rowspan="2" class="py-1.5 px-2 font-semibold text-right align-bottom border-b border-line whitespace-nowrap">Panjang (M)</th>
-              <th rowspan="2" class="py-1.5 px-2 font-semibold text-center align-bottom border-b border-line">Posisi</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line whitespace-nowrap">Panjang<br>(M)</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">Posisi</th>
               ${isEditor()?`<th rowspan="2" class="py-1.5 px-2 no-print"></th>`:''}
             </tr>
-            <tr class="text-ink-500 text-left bg-ink-50">
+            <tr class="text-ink-500 text-center bg-ink-50">
               <th class="py-1 px-2 font-semibold whitespace-nowrap">STA Awal</th>
               <th class="py-1 px-2 font-semibold"></th>
               <th class="py-1 px-2 font-semibold whitespace-nowrap">STA Akhir</th>
