@@ -4035,7 +4035,7 @@ function renderItemPekerjaanList(overlay, kg){
           <td class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_add,2,true)}</td>
           <td class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_terpasang,2,true)}</td>
           <td class="py-1.5 px-2 border-t border-line text-ink-400 text-center" colspan="5">— belum ada rincian STA —</td>
-          ${isEditor()?`<td class="py-1.5 px-2 border-t border-line no-print"></td>`:''}
+          ${isEditor()?`<td class="py-1.5 px-2 border-t border-line no-print sticky right-0 z-10 bg-white shadow-[-4px_0_4px_-2px_rgba(0,0,0,0.06)]"></td>`:''}
         </tr>`);
       } else {
         // Baris JUDUL ITEM: nama pekerjaan + total volume, kolom STA/Panjang/
@@ -4051,7 +4051,7 @@ function renderItemPekerjaanList(overlay, kg){
           <td class="py-1.5 px-2 border-t border-line"></td>
           <td class="py-1.5 px-2 border-t border-line"></td>
           <td class="py-1.5 px-2 border-t border-line"></td>
-          ${isEditor()?`<td class="py-1.5 px-2 border-t border-line no-print"></td>`:''}
+          ${isEditor()?`<td class="py-1.5 px-2 border-t border-line no-print sticky right-0 z-10 bg-white shadow-[-4px_0_4px_-2px_rgba(0,0,0,0.06)]"></td>`:''}
         </tr>`);
         // Hierarki 2 tingkat (lihat migration 027):
         //  - induk_segmen  = kelompok besar, dicetak BOLD tiap kali berubah
@@ -4078,18 +4078,23 @@ function renderItemPekerjaanList(overlay, kg){
           subLabelSebelumnya = subLabelSekarang;
 
           let isiUraian = '';
-          if(indukBerubah && indukSekarang) isiUraian += `<div class="font-semibold text-ink-600">- ${indukSekarang}</div>`;
+          if(indukBerubah && indukSekarang) isiUraian += `<div class="font-semibold text-ink-600">${indukSekarang}</div>`;
           if(isSubBagian && (subLabelBerubah || indukBerubah)) isiUraian += `<div class="italic text-ink-500 pl-3">${subLabelSekarang}</div>`;
+          // STA opsional: kalau STA Awal & STA Akhir sama-sama kosong,
+          // tampilkan blank saja (tidak perlu tanda "s.d." atau strip).
+          const staAwal = (r.sta_awal||'').trim();
+          const staAkhir = (r.sta_akhir||'').trim();
+          const staAdaIsi = !!(staAwal || staAkhir);
           bodyRows.push(`<tr data-detail-id="${r.id}">
             ${uraianTd(isiUraian)}
             <td class="py-1.5 px-2 border-t border-line"></td>
             <td class="py-1.5 px-2 border-t border-line font-mono text-right whitespace-nowrap">${r.volume_terpasang!=null?fmtNum(r.volume_terpasang,2,true):''}</td>
-            <td class="py-1.5 px-2 border-t border-line font-mono whitespace-nowrap">${r.sta_awal}</td>
-            <td class="py-1.5 px-2 border-t border-line text-center text-ink-400">s.d.</td>
-            <td class="py-1.5 px-2 border-t border-line font-mono whitespace-nowrap">${r.sta_akhir}</td>
+            <td class="py-1.5 px-2 border-t border-line font-mono whitespace-nowrap">${staAwal}</td>
+            <td class="py-1.5 px-2 border-t border-line text-center text-ink-400">${staAdaIsi?'s.d.':''}</td>
+            <td class="py-1.5 px-2 border-t border-line font-mono whitespace-nowrap">${staAkhir}</td>
             <td class="py-1.5 px-2 border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(r.panjang_m,2,true)}</td>
             <td class="py-1.5 px-2 border-t border-line text-center whitespace-nowrap">${r.posisi||'—'}</td>
-            ${isEditor()?`<td class="py-1.5 px-2 border-t border-line whitespace-nowrap no-print">
+            ${isEditor()?`<td class="py-1.5 px-2 border-t border-line whitespace-nowrap no-print sticky right-0 z-10 bg-white shadow-[-4px_0_4px_-2px_rgba(0,0,0,0.06)]">
               <button data-edit-detail="${r.id}" data-item-id="${it.id}" class="text-ink-400 hover:text-navy-700">${icon('edit','w-3.5 h-3.5')}</button>
               <button data-hapus-detail="${r.id}" data-item-id="${it.id}" class="text-ink-400 hover:text-[var(--bad)]">${icon('trash','w-3.5 h-3.5')}</button>
             </td>`:''}
@@ -4105,7 +4110,7 @@ function renderItemPekerjaanList(overlay, kg){
           <td class="py-1 px-2 border-t border-line text-right" colspan="3">Total Panjang</td>
           <td class="py-1 px-2 border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(totalPanjang,2,true)}</td>
           <td class="py-1 px-2 border-t border-line"></td>
-          ${isEditor()?`<td class="py-1 px-2 border-t border-line no-print"></td>`:''}
+          ${isEditor()?`<td class="py-1 px-2 border-t border-line no-print sticky right-0 z-10 bg-ink-50 shadow-[-4px_0_4px_-2px_rgba(0,0,0,0.06)]"></td>`:''}
         </tr>`);
       }
     });
@@ -4124,7 +4129,7 @@ function renderItemPekerjaanList(overlay, kg){
               <th colspan="3" class="py-1 px-2 font-semibold text-center border-b border-line">STA</th>
               <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line whitespace-nowrap">Panjang<br>(M)</th>
               <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">Posisi</th>
-              ${isEditor()?`<th rowspan="2" class="py-1.5 px-2 no-print"></th>`:''}
+              ${isEditor()?`<th rowspan="2" class="py-1.5 px-2 no-print sticky right-0 z-20 bg-ink-50 shadow-[-4px_0_4px_-2px_rgba(0,0,0,0.06)]">Aksi</th>`:''}
             </tr>
             <tr class="text-ink-500 text-center bg-ink-50">
               <th class="py-1 px-2 font-semibold whitespace-nowrap">STA Awal</th>
@@ -4259,8 +4264,8 @@ function openDetailVolumeFormModal(itemPekerjaanId, editData, onSaved){
           <div><label class="text-[12.5px] font-semibold text-ink-600">Volume Terpasang</label><input id="dv-vol-terpasang" type="number" step="0.01" value="${editData?.volume_terpasang??''}"></div>
         </div>
         <div class="grid grid-cols-2 gap-3">
-          <div><label class="text-[12.5px] font-semibold text-ink-600">STA Awal *</label><input id="dv-sta-awal" required placeholder="18+500" value="${editData?.sta_awal||''}"></div>
-          <div><label class="text-[12.5px] font-semibold text-ink-600">STA Akhir *</label><input id="dv-sta-akhir" required placeholder="18+900" value="${editData?.sta_akhir||''}"></div>
+          <div><label class="text-[12.5px] font-semibold text-ink-600">STA Awal</label><input id="dv-sta-awal" placeholder="18+500 (opsional)" value="${editData?.sta_awal||''}"></div>
+          <div><label class="text-[12.5px] font-semibold text-ink-600">STA Akhir</label><input id="dv-sta-akhir" placeholder="18+900 (opsional)" value="${editData?.sta_akhir||''}"></div>
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div><label class="text-[12.5px] font-semibold text-ink-600">Panjang (M)</label><input id="dv-panjang" type="number" step="0.01" value="${editData?.panjang_m??''}"></div>
@@ -4286,8 +4291,8 @@ function openDetailVolumeFormModal(itemPekerjaanId, editData, onSaved){
         nama_segmen: overlay.querySelector('#dv-segmen').value || null,
         volume_add: overlay.querySelector('#dv-vol-add').value || null,
         volume_terpasang: overlay.querySelector('#dv-vol-terpasang').value || null,
-        sta_awal: overlay.querySelector('#dv-sta-awal').value.trim(),
-        sta_akhir: overlay.querySelector('#dv-sta-akhir').value.trim(),
+        sta_awal: overlay.querySelector('#dv-sta-awal').value.trim() || null,
+        sta_akhir: overlay.querySelector('#dv-sta-akhir').value.trim() || null,
         panjang_m: overlay.querySelector('#dv-panjang').value || null,
         posisi: overlay.querySelector('#dv-posisi').value || null,
         urutan: overlay.querySelector('#dv-urutan').value || 0,
