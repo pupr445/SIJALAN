@@ -3955,24 +3955,36 @@ function renderItemPekerjaanList(overlay, kg){
       const rows = detailMap[it.id] || [];
       if(it.divisi_nomor !== lastDivisi){
         lastDivisi = it.divisi_nomor;
-        bodyRows.push(`<tr class="bg-navy-50/70"${firstGroup?'':' '}><td colspan="${isEditor()?14:13}" class="py-1.5 px-2 font-display font-bold text-[12.5px] text-navy-800 border-t border-line">${it.divisi_nomor?`DIVISI ${it.divisi_nomor} — ${(it.divisi_nama||'').toUpperCase()}`:'TANPA REFERENSI DIVISI'}</td></tr>`);
+        bodyRows.push(`<tr class="bg-navy-50/70"${firstGroup?'':' '}><td colspan="${isEditor()?13:12}" class="py-1.5 px-2 font-display font-bold text-[12.5px] text-navy-800 border-t border-line">${it.divisi_nomor?`DIVISI ${it.divisi_nomor} — ${(it.divisi_nama||'').toUpperCase()}`:'TANPA REFERENSI DIVISI'}</td></tr>`);
         firstGroup = false;
       }
       no++;
-      const rowspan = Math.max(rows.length, 1);
+      const hasRows = rows.length > 0;
+      // Kolom label (No/Mata Pembayaran/Uraian/Sat) dibuat menyatu (rowspan)
+      // sampai ke baris ringkasan "Total Panjang" di bagian bawah, supaya
+      // baris ringkasan tetap sejajar lurus dengan kolom "Panjang (M)" —
+      // sebelumnya rowspan berhenti sebelum baris ringkasan, sehingga sel
+      // ringkasan ikut bergeser ke kolom yang salah.
+      const labelRowspan = hasRows ? rows.length + 1 : 1;
+      // Kolom Vol. ADD & Vol. Terpasang HANYA menyatu untuk baris rincian STA
+      // (tidak sampai ke baris ringkasan), karena baris ringkasan memakai
+      // posisi kolom ini untuk menampilkan Progres % — sesuai permintaan:
+      // Progres % tampil di ringkasan, sejajar seperti "Total Panjang".
+      const volRowspan = hasRows ? rows.length : 1;
       const totalPanjang = rows.reduce((s,r)=>s+(Number(r.panjang_m)||0), 0);
-      const firstCells = `
-        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono">${no}</td>
-        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono whitespace-nowrap">${it.kode_mata_pembayaran}</td>
-        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-medium min-w-[160px]">${it.uraian_pekerjaan}${it.nama_seksi?`<div class="text-[11px] text-ink-400 font-normal mt-0.5">Seksi ${it.kode_seksi||''} ${it.nama_seksi}</div>`:''}${isEditor()?`<div class="no-print flex gap-2 mt-1.5">
+      const labelCells = `
+        <td rowspan="${labelRowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono">${no}</td>
+        <td rowspan="${labelRowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono whitespace-nowrap">${it.kode_mata_pembayaran}</td>
+        <td rowspan="${labelRowspan}" class="py-1.5 px-2 align-top border-t border-line font-medium min-w-[160px]">${it.uraian_pekerjaan}${it.nama_seksi?`<div class="text-[11px] text-ink-400 font-normal mt-0.5">Seksi ${it.kode_seksi||''} ${it.nama_seksi}</div>`:''}${isEditor()?`<div class="no-print flex gap-2 mt-1.5">
             <button data-edit-item="${it.id}" class="text-ink-400 hover:text-navy-700" title="Ubah item">${icon('edit','w-3.5 h-3.5')}</button>
             <button data-hapus-item="${it.id}" class="text-ink-400 hover:text-[var(--bad)]" title="Hapus item">${icon('trash','w-3.5 h-3.5')}</button>
             <button data-tambah-detail="${it.id}" class="text-navy-700 font-semibold underline text-[11px]" title="Tambah baris STA">+ Baris STA</button>
           </div>`:''}</td>
-        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line">${it.satuan}</td>
-        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_add,2,true)}</td>
-        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_terpasang,2,true)}</td>
-        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${it.persen_progres!=null?fmtNum(it.persen_progres,2,true)+'%':'—'}</td>`;
+        <td rowspan="${labelRowspan}" class="py-1.5 px-2 align-top border-t border-line">${it.satuan}</td>`;
+      const volCells = `
+        <td rowspan="${volRowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_add,2,true)}</td>
+        <td rowspan="${volRowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_terpasang,2,true)}</td>`;
+      const firstCells = labelCells + volCells;
       if(!rows.length){
         bodyRows.push(`<tr>${firstCells}
           <td class="py-1.5 px-2 border-t border-line text-ink-400 text-center" colspan="6">— belum ada rincian STA —</td>
@@ -3994,7 +4006,12 @@ function renderItemPekerjaanList(overlay, kg){
             </td>`:''}
           </tr>`);
         });
+        // Baris ringkasan: Progres % ditampilkan sejajar di bawah kolom
+        // Vol. Terpasang, dan Total Panjang sejajar lurus di bawah kolom
+        // Panjang (M) — keduanya sebagai satu baris ringkasan per item.
         bodyRows.push(`<tr class="bg-ink-50 font-semibold">
+          <td class="py-1 px-2 border-t border-line"></td>
+          <td class="py-1 px-2 border-t border-line font-mono text-right whitespace-nowrap">${it.persen_progres!=null?'Progres '+fmtNum(it.persen_progres,2,true)+'%':'—'}</td>
           <td class="py-1 px-2 border-t border-line text-right" colspan="4">Total Panjang</td>
           <td class="py-1 px-2 border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(totalPanjang,2,true)}</td>
           <td class="py-1 px-2 border-t border-line"></td>
@@ -4014,7 +4031,6 @@ function renderItemPekerjaanList(overlay, kg){
               <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">Sat</th>
               <th rowspan="2" class="py-1.5 px-2 font-semibold text-right align-bottom border-b border-line">Vol. ADD</th>
               <th rowspan="2" class="py-1.5 px-2 font-semibold text-right align-bottom border-b border-line">Vol. Terpasang</th>
-              <th rowspan="2" class="py-1.5 px-2 font-semibold text-right align-bottom border-b border-line whitespace-nowrap">Progres %</th>
               <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line whitespace-nowrap">Segmen</th>
               <th colspan="3" class="py-1 px-2 font-semibold text-center border-b border-line">STA</th>
               <th rowspan="2" class="py-1.5 px-2 font-semibold text-right align-bottom border-b border-line whitespace-nowrap">Panjang (M)</th>
