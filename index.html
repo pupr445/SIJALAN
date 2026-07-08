@@ -220,7 +220,12 @@
        akan tetap otomatis terulang tiap halaman tanpa perlu sticky). */
     #item-pekerjaan-list .overflow-x-auto{ max-height:none !important; }
     #item-pekerjaan-list thead{ position:static !important; top:auto !important; }
-    #item-pekerjaan-list tr{ break-inside: avoid; page-break-inside: avoid; }
+    /* Catatan: JANGAN tambahkan break-inside:avoid pada <tr> tabel ini —
+       kolom No/Mata Pembayaran/Sat memakai rowspan lintas beberapa baris
+       (judul item, rincian STA, ringkasan). break-inside:avoid per-baris
+       pada tabel ber-rowspan terbukti membuat Chrome menggandakan garis
+       batas baris saat mencetak (pernah dicoba & menyebabkan garis dobel
+       tepat di bawah baris judul item, mis. di bawah "Seksi 7.1 ..."). */
 
     #item-pekerjaan-list table{
       width:100% !important; min-width:0 !important; table-layout:auto;
