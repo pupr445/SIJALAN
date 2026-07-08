@@ -1462,6 +1462,34 @@ const api = {
   async dokumenMatrix(penangananId){ const {data,error} = await sb.from('v_dokumen_matrix').select('*').eq('penanganan_id',penangananId).order('tahap_urutan').order('urutan_dokumen'); if(error) throw error; return data; },
   async updateDokumen(id, payload){ const {error} = await sb.from('dokumen_kegiatan').update(payload).eq('id',id); if(error) throw error; },
 
+  // --- master Divisi/Seksi Spek BM & posisi ---
+  async divisiBm(){ const {data,error} = await sb.from('divisi_bm').select('*').order('nomor'); if(error) throw error; return data; },
+  async seksiBm(){ const {data,error} = await sb.from('seksi_bm').select('*, divisi_bm(nomor,nama)').order('kode_seksi'); if(error) throw error; return data; },
+  async posisiRef(){ const {data,error} = await sb.from('posisi_ref').select('*').order('urutan'); if(error) throw error; return data; },
+
+  // --- konsultan ---
+  async konsultanList(){ const {data,error} = await sb.from('konsultan').select('*').order('nama'); if(error) throw error; return data; },
+  async insertKonsultan(payload){ const {data,error} = await sb.from('konsultan').insert(payload).select().single(); if(error) throw error; return data; },
+
+  // --- kontrak (No. Kontrak, Addendum, Nilai, Waktu Pelaksana, Konsultan) ---
+  async kontrakByPenanganan(penangananId){ const {data,error} = await sb.from('kontrak').select('*').eq('penanganan_id',penangananId).maybeSingle(); if(error) throw error; return data; },
+  async laporanPaket(penangananId){ const {data,error} = await sb.from('v_laporan_paket').select('*').eq('penanganan_id',penangananId).maybeSingle(); if(error) throw error; return data; },
+  async upsertKontrak(penangananId, payload){
+    const existing = await api.kontrakByPenanganan(penangananId);
+    if(existing){ const {error} = await sb.from('kontrak').update(payload).eq('id',existing.id); if(error) throw error; }
+    else { const {error} = await sb.from('kontrak').insert({...payload, penanganan_id:penangananId}); if(error) throw error; }
+  },
+
+  // --- item pekerjaan (mata pembayaran) & detail volume per STA ---
+  async itemPekerjaanList(penangananId){ const {data,error} = await sb.from('v_item_pekerjaan_rekap').select('*').eq('penanganan_id',penangananId).order('urutan'); if(error) throw error; return data; },
+  async insertItemPekerjaan(payload){ const {data,error} = await sb.from('item_pekerjaan').insert(payload).select().single(); if(error) throw error; return data; },
+  async updateItemPekerjaan(id, payload){ const {error} = await sb.from('item_pekerjaan').update(payload).eq('id',id); if(error) throw error; },
+  async deleteItemPekerjaan(id){ const {error} = await sb.from('item_pekerjaan').delete().eq('id',id); if(error) throw error; },
+  async detailVolumeList(itemId){ const {data,error} = await sb.from('detail_volume_item').select('*').eq('item_pekerjaan_id',itemId).order('urutan'); if(error) throw error; return data; },
+  async insertDetailVolume(payload){ const {data,error} = await sb.from('detail_volume_item').insert(payload).select().single(); if(error) throw error; return data; },
+  async updateDetailVolume(id, payload){ const {error} = await sb.from('detail_volume_item').update(payload).eq('id',id); if(error) throw error; },
+  async deleteDetailVolume(id){ const {error} = await sb.from('detail_volume_item').delete().eq('id',id); if(error) throw error; },
+
   // --- kejadian bencana ---
   async bencana(){ const {data,error} = await sb.from('v_kejadian_bencana').select('*').order('tanggal_kejadian',{ascending:false}).limit(100); if(error) throw error; return data; },
   async bencanaByRuas(ruasId){
@@ -3721,6 +3749,19 @@ function openKegiatanDetailModal(kg){
       </div>
     </div>`:''}
     ${kg.link_dokumentasi?`<div class="mb-4 text-[13px]"><span class="text-ink-400">Link Dokumentasi</span><div class="mt-0.5"><a href="${kg.link_dokumentasi}" target="_blank" class="text-navy-700 underline break-all">${kg.link_dokumentasi}</a></div></div>`:''}
+
+    <div class="flex items-center justify-between mb-2">
+      <h4 class="font-display font-bold text-[14px]">Data Kontrak &amp; Konsultan</h4>
+      ${isEditor()?`<button data-edit-kontrak class="no-print text-[12px] text-navy-700 font-semibold underline">Ubah</button>`:''}
+    </div>
+    <div id="kontrak-info" class="text-[13px] mb-4"><div class="skel h-24 w-full"></div></div>
+
+    <div class="flex items-center justify-between mb-2">
+      <h4 class="font-display font-bold text-[14px]">Rincian Mata Pembayaran (Backup Volume)</h4>
+      ${isEditor()?`<button data-tambah-item class="no-print text-[12px] text-navy-700 font-semibold underline">+ Tambah Item</button>`:''}
+    </div>
+    <div id="item-pekerjaan-list" class="text-[13px] mb-4"><div class="skel h-24 w-full"></div></div>
+
     <h4 class="font-display font-bold text-[14px] mb-2">Kelengkapan Dokumen</h4>
     <div id="dok-matrix" class="text-[13px]"><div class="skel h-32 w-full"></div></div>
   `);
@@ -3728,6 +3769,15 @@ function openKegiatanDetailModal(kg){
   overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
   overlay.querySelector('[data-cetak-kegiatan]').addEventListener('click', ()=>cetakModal());
   hydrateFotoThumbs(overlay);
+
+  renderKontrakInfo(overlay, kg);
+  renderItemPekerjaanList(overlay, kg);
+  overlay.querySelector('[data-edit-kontrak]')?.addEventListener('click', ()=>{
+    openKontrakFormModal(kg.id, ()=>renderKontrakInfo(overlay, kg));
+  });
+  overlay.querySelector('[data-tambah-item]')?.addEventListener('click', ()=>{
+    openItemPekerjaanFormModal(kg.id, null, ()=>renderItemPekerjaanList(overlay, kg));
+  });
 
   api.dokumenMatrix(kg.id).then(rows=>{
     const box = overlay.querySelector('#dok-matrix');
@@ -3764,6 +3814,328 @@ function openKegiatanDetailModal(kg){
       });
     }
   }).catch(err=>{ overlay.querySelector('#dok-matrix').innerHTML = errorPanel(err); });
+}
+
+// --- 11b-1. DATA KONTRAK & KONSULTAN (bagian header paket, mengacu format Backup Data) ---
+function renderKontrakInfo(overlay, kg){
+  const box = overlay.querySelector('#kontrak-info');
+  if(!box) return;
+  api.laporanPaket(kg.id).then(d=>{
+    if(!d || !d.no_kontrak){
+      box.innerHTML = `<p class="text-ink-400">Belum ada data kontrak. ${isEditor()?'Klik "Ubah" untuk mengisi.':''}</p>`;
+      return;
+    }
+    box.innerHTML = `
+      <div class="grid grid-cols-2 gap-3">
+        <div><span class="text-ink-400">No. Kontrak</span><div class="font-medium">${d.no_kontrak||'—'}</div></div>
+        <div><span class="text-ink-400">Tanggal Kontrak</span><div class="font-medium">${fmtDate(d.tanggal_kontrak)}</div></div>
+        <div><span class="text-ink-400">No. Addendum</span><div class="font-medium">${d.no_addendum||'—'}</div></div>
+        <div><span class="text-ink-400">Tanggal Addendum</span><div class="font-medium">${d.tanggal_addendum?fmtDate(d.tanggal_addendum):'—'}</div></div>
+        <div><span class="text-ink-400">Nilai Kontrak</span><div class="font-medium">${fmtRp(d.nilai_kontrak)}</div></div>
+        <div><span class="text-ink-400">Waktu Pelaksana</span><div class="font-medium">${d.waktu_pelaksana_hk?d.waktu_pelaksana_hk+' HK':'—'}${d.tgl_mulai_pelaksana?` (${fmtDate(d.tgl_mulai_pelaksana)} – ${fmtDate(d.tgl_akhir_pelaksana)})`:''}</div></div>
+        <div><span class="text-ink-400">Kontraktor</span><div class="font-medium">${d.nama_kontraktor||'—'}</div></div>
+        <div><span class="text-ink-400">Direktur / No HP</span><div class="font-medium">${d.direktur_kontraktor||'—'} ${d.telepon_kontraktor?'/ '+d.telepon_kontraktor:''}</div></div>
+        <div><span class="text-ink-400">Konsultan</span><div class="font-medium">${d.nama_konsultan||'—'}</div></div>
+        <div><span class="text-ink-400">Direktur / No HP</span><div class="font-medium">${d.direktur_konsultan||'—'} ${d.telepon_konsultan?'/ '+d.telepon_konsultan:''}</div></div>
+        <div class="col-span-2"><span class="text-ink-400">Status Update</span><div class="font-medium">${d.status_update?fmtDate(d.status_update):'—'}</div></div>
+      </div>`;
+  }).catch(err=>{ box.innerHTML = errorPanel(err); });
+}
+
+function openKontrakFormModal(penangananId, onSaved){
+  Promise.all([api.kontrakByPenanganan(penangananId), api.konsultanList()]).then(([kontrak, konsultanList])=>{
+    const overlay = openModal(`
+      <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
+      <h3 class="font-display font-extrabold text-lg mb-4">Data Kontrak &amp; Konsultan</h3>
+      <form id="form-kontrak" class="space-y-3">
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="text-[12.5px] font-semibold text-ink-600">No. Kontrak</label><input id="kn-no" value="${kontrak?.no_kontrak||''}"></div>
+          <div><label class="text-[12.5px] font-semibold text-ink-600">Tanggal Kontrak</label><input id="kn-tgl" type="date" value="${kontrak?.tanggal_kontrak||''}"></div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="text-[12.5px] font-semibold text-ink-600">No. Addendum</label><input id="kn-add-no" value="${kontrak?.no_addendum||''}"></div>
+          <div><label class="text-[12.5px] font-semibold text-ink-600">Tanggal Addendum</label><input id="kn-add-tgl" type="date" value="${kontrak?.tanggal_addendum||''}"></div>
+        </div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Nilai Kontrak (Rp)</label><input id="kn-nilai" type="number" step="1" min="0" value="${kontrak?.nilai_kontrak??''}"></div>
+        <div class="grid grid-cols-3 gap-3">
+          <div><label class="text-[12.5px] font-semibold text-ink-600">Waktu Pelaksana (HK)</label><input id="kn-hk" type="number" min="0" value="${kontrak?.waktu_pelaksana_hk??''}"></div>
+          <div><label class="text-[12.5px] font-semibold text-ink-600">Mulai</label><input id="kn-mulai" type="date" value="${kontrak?.tgl_mulai_pelaksana||''}"></div>
+          <div><label class="text-[12.5px] font-semibold text-ink-600">Selesai</label><input id="kn-selesai" type="date" value="${kontrak?.tgl_akhir_pelaksana||''}"></div>
+        </div>
+        <div>
+          <label class="text-[12.5px] font-semibold text-ink-600">Konsultan Pengawas</label>
+          <select id="kn-konsultan">
+            <option value="">— Pilih konsultan —</option>
+            ${konsultanList.map(k=>`<option value="${k.id}" ${kontrak?.konsultan_id===k.id?'selected':''}>${k.nama}</option>`).join('')}
+            <option value="__new__">+ Tambah konsultan baru…</option>
+          </select>
+          <div id="kn-konsultan-new" class="hidden grid grid-cols-2 gap-2 mt-2">
+            <input id="kn-konsultan-nama" placeholder="Nama konsultan" class="col-span-2">
+            <input id="kn-konsultan-direktur" placeholder="Nama direktur">
+            <input id="kn-konsultan-telp" placeholder="No. HP direktur">
+          </div>
+        </div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Status Update (tanggal laporan)</label><input id="kn-status-update" type="date" value="${kontrak?.status_update||''}"></div>
+        <div id="kn-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
+        <button type="submit" class="btn-primary w-full">Simpan</button>
+      </form>`);
+    overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+    overlay.querySelector('#kn-konsultan').addEventListener('change', (e)=>{
+      overlay.querySelector('#kn-konsultan-new').classList.toggle('hidden', e.target.value!=='__new__');
+    });
+    overlay.querySelector('#form-kontrak').addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const errBox = overlay.querySelector('#kn-err');
+      const submitBtn = overlay.querySelector('button[type=submit]');
+      submitBtn.disabled = true;
+      try{
+        let konsultanId = overlay.querySelector('#kn-konsultan').value || null;
+        if(konsultanId === '__new__'){
+          const nama = overlay.querySelector('#kn-konsultan-nama').value.trim();
+          if(!nama) throw new Error('Nama konsultan wajib diisi.');
+          const created = await api.insertKonsultan({
+            nama,
+            direktur: overlay.querySelector('#kn-konsultan-direktur').value || null,
+            telepon: overlay.querySelector('#kn-konsultan-telp').value || null,
+          });
+          konsultanId = created.id;
+        }
+        const payload = {
+          no_kontrak: overlay.querySelector('#kn-no').value || null,
+          tanggal_kontrak: overlay.querySelector('#kn-tgl').value || null,
+          no_addendum: overlay.querySelector('#kn-add-no').value || null,
+          tanggal_addendum: overlay.querySelector('#kn-add-tgl').value || null,
+          nilai_kontrak: overlay.querySelector('#kn-nilai').value || null,
+          waktu_pelaksana_hk: overlay.querySelector('#kn-hk').value || null,
+          tgl_mulai_pelaksana: overlay.querySelector('#kn-mulai').value || null,
+          tgl_akhir_pelaksana: overlay.querySelector('#kn-selesai').value || null,
+          konsultan_id: konsultanId,
+          status_update: overlay.querySelector('#kn-status-update').value || null,
+        };
+        await api.upsertKontrak(penangananId, payload);
+        overlay.remove();
+        notifikasiToast('Data kontrak tersimpan.', 'success');
+        if(onSaved) onSaved();
+      }catch(err){
+        submitBtn.disabled = false;
+        errBox.textContent = err.code ? terjemahkanErrorDb(err) : err.message;
+        errBox.classList.remove('hidden');
+      }
+    });
+  }).catch(err=>alert('Gagal memuat data kontrak: '+terjemahkanErrorDb(err)));
+}
+
+// --- 11b-2. RINCIAN MATA PEMBAYARAN (item_pekerjaan) & DETAIL VOLUME PER STA ---
+function renderItemPekerjaanList(overlay, kg){
+  const box = overlay.querySelector('#item-pekerjaan-list');
+  if(!box) return;
+  api.itemPekerjaanList(kg.id).then(items=>{
+    if(!items.length){ box.innerHTML = `<p class="text-ink-400">Belum ada item mata pembayaran.</p>`; return; }
+    box.innerHTML = items.map(it=>`
+      <div class="border border-line rounded-xl p-3 mb-2" data-item-id="${it.id}">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <div class="font-mono text-[12px] text-ink-400">${it.kode_mata_pembayaran}${it.divisi_nomor?` · Div ${it.divisi_nomor}${it.nama_seksi?' — '+it.nama_seksi:''}`:''}</div>
+            <div class="font-semibold text-ink-800">${it.uraian_pekerjaan}</div>
+          </div>
+          ${isEditor()?`<div class="flex gap-2 shrink-0 no-print">
+            <button data-edit-item title="Ubah item" class="text-ink-400 hover:text-navy-700">${icon('edit','w-4 h-4')}</button>
+            <button data-hapus-item title="Hapus item" class="text-ink-400 hover:text-[var(--bad)]">${icon('trash','w-4 h-4')}</button>
+          </div>`:''}
+        </div>
+        <div class="grid grid-cols-3 gap-2 mt-2 text-[12.5px]">
+          <div><span class="text-ink-400">Vol. ADD</span><div class="font-medium font-mono">${fmtNum(it.total_volume_add,2)} ${it.satuan}</div></div>
+          <div><span class="text-ink-400">Vol. Terpasang</span><div class="font-medium font-mono">${fmtNum(it.total_volume_terpasang,2)} ${it.satuan}</div></div>
+          <div><span class="text-ink-400">Progres</span><div class="font-medium font-mono">${it.persen_progres!=null?it.persen_progres+'%':'—'}</div></div>
+        </div>
+        <button data-toggle-detail class="no-print text-[12px] text-navy-700 font-semibold underline mt-2">Lihat rincian STA</button>
+        <div data-detail-box class="hidden mt-2"></div>
+      </div>`).join('');
+
+    box.querySelectorAll('[data-item-id]').forEach(card=>{
+      const itemId = card.dataset.itemId;
+      const itemData = items.find(i=>i.id===itemId);
+      card.querySelector('[data-edit-item]')?.addEventListener('click', ()=>{
+        openItemPekerjaanFormModal(kg.id, itemData, ()=>renderItemPekerjaanList(overlay, kg));
+      });
+      card.querySelector('[data-hapus-item]')?.addEventListener('click', async ()=>{
+        if(!confirm('Hapus item pekerjaan ini beserta seluruh rincian STA-nya?')) return;
+        try{ await api.deleteItemPekerjaan(itemId); renderItemPekerjaanList(overlay, kg); notifikasiToast('Item dihapus.','success'); }
+        catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
+      });
+      const detailBox = card.querySelector('[data-detail-box]');
+      let loaded = false;
+      card.querySelector('[data-toggle-detail]').addEventListener('click', async (e)=>{
+        const willShow = detailBox.classList.contains('hidden');
+        detailBox.classList.toggle('hidden');
+        e.target.textContent = willShow ? 'Sembunyikan rincian STA' : 'Lihat rincian STA';
+        if(willShow && !loaded){ loaded = true; renderDetailVolumeTable(detailBox, itemId, kg.id, overlay); }
+      });
+    });
+  }).catch(err=>{ box.innerHTML = errorPanel(err); });
+}
+
+function renderDetailVolumeTable(container, itemPekerjaanId, penangananId, overlay){
+  container.innerHTML = `<div class="skel h-16 w-full"></div>`;
+  api.detailVolumeList(itemPekerjaanId).then(rows=>{
+    container.innerHTML = `
+      <div class="overflow-x-auto -mx-1">
+        <table class="w-full text-[12px]">
+          <thead><tr class="text-ink-400 text-left">
+            <th class="py-1 pr-2">Segmen</th><th class="py-1 pr-2">Vol ADD</th><th class="py-1 pr-2">Vol Terpasang</th>
+            <th class="py-1 pr-2">STA Awal</th><th class="py-1 pr-2">STA Akhir</th><th class="py-1 pr-2">Panjang (M)</th>
+            <th class="py-1 pr-2">Posisi</th>${isEditor()?'<th></th>':''}
+          </tr></thead>
+          <tbody>
+            ${rows.map(r=>`
+              <tr class="border-t border-line" data-detail-id="${r.id}">
+                <td class="py-1 pr-2">${r.nama_segmen||'—'}</td>
+                <td class="py-1 pr-2 font-mono">${fmtNum(r.volume_add,2)}</td>
+                <td class="py-1 pr-2 font-mono">${fmtNum(r.volume_terpasang,2)}</td>
+                <td class="py-1 pr-2 font-mono">${r.sta_awal}</td>
+                <td class="py-1 pr-2 font-mono">${r.sta_akhir}</td>
+                <td class="py-1 pr-2 font-mono">${fmtNum(r.panjang_m,2)}</td>
+                <td class="py-1 pr-2">${r.posisi||'—'}</td>
+                ${isEditor()?`<td class="py-1 pr-2 whitespace-nowrap">
+                  <button data-edit-detail class="text-ink-400 hover:text-navy-700">${icon('edit','w-3.5 h-3.5')}</button>
+                  <button data-hapus-detail class="text-ink-400 hover:text-[var(--bad)]">${icon('trash','w-3.5 h-3.5')}</button>
+                </td>`:''}
+              </tr>`).join('')}
+          </tbody>
+        </table>
+        ${!rows.length?'<p class="text-ink-400 py-1">Belum ada baris rincian.</p>':''}
+      </div>
+      ${isEditor()?`<button data-tambah-detail class="no-print text-[12px] text-navy-700 font-semibold underline mt-1">+ Tambah baris STA</button>`:''}`;
+
+    container.querySelector('[data-tambah-detail]')?.addEventListener('click', ()=>{
+      openDetailVolumeFormModal(itemPekerjaanId, null, ()=>{ renderDetailVolumeTable(container, itemPekerjaanId, penangananId, overlay); renderItemPekerjaanList(overlay, {id:penangananId}); });
+    });
+    container.querySelectorAll('[data-detail-id]').forEach(tr=>{
+      const detailId = tr.dataset.detailId;
+      const rowData = rows.find(r=>r.id===detailId);
+      tr.querySelector('[data-edit-detail]')?.addEventListener('click', ()=>{
+        openDetailVolumeFormModal(itemPekerjaanId, rowData, ()=>{ renderDetailVolumeTable(container, itemPekerjaanId, penangananId, overlay); renderItemPekerjaanList(overlay, {id:penangananId}); });
+      });
+      tr.querySelector('[data-hapus-detail]')?.addEventListener('click', async ()=>{
+        if(!confirm('Hapus baris rincian STA ini?')) return;
+        try{
+          await api.deleteDetailVolume(detailId);
+          renderDetailVolumeTable(container, itemPekerjaanId, penangananId, overlay);
+          renderItemPekerjaanList(overlay, {id:penangananId});
+        }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
+      });
+    });
+  }).catch(err=>{ container.innerHTML = errorPanel(err); });
+}
+
+function openItemPekerjaanFormModal(penangananId, editData, onSaved){
+  const isEdit = !!editData;
+  api.seksiBm().then(seksiList=>{
+    const overlay = openModal(`
+      <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
+      <h3 class="font-display font-extrabold text-lg mb-4">${isEdit?'Ubah':'Tambah'} Item Mata Pembayaran</h3>
+      <form id="form-item" class="space-y-3">
+        <div>
+          <label class="text-[12.5px] font-semibold text-ink-600">Seksi Spek BM (opsional)</label>
+          <select id="ip-seksi">
+            <option value="">— Tanpa referensi seksi —</option>
+            ${seksiList.map(s=>`<option value="${s.id}" ${editData?.seksi_bm_id===s.id?'selected':''}>Div ${s.divisi_bm?.nomor} — ${s.kode_seksi} ${s.nama_seksi}</option>`).join('')}
+          </select>
+        </div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Kode Mata Pembayaran *</label><input id="ip-kode" required placeholder="contoh: 3.1.(9)" value="${editData?.kode_mata_pembayaran||''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Uraian Pekerjaan *</label><input id="ip-uraian" required value="${editData?.uraian_pekerjaan||''}"></div>
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="text-[12.5px] font-semibold text-ink-600">Satuan *</label><input id="ip-satuan" required placeholder="M3 / M2 / Ls" value="${editData?.satuan||''}"></div>
+          <div><label class="text-[12.5px] font-semibold text-ink-600">Urutan Tampil</label><input id="ip-urutan" type="number" value="${editData?.urutan??0}"></div>
+        </div>
+        <div id="ip-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
+        <button type="submit" class="btn-primary w-full">Simpan</button>
+      </form>`);
+    overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+    overlay.querySelector('#form-item').addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const errBox = overlay.querySelector('#ip-err');
+      const submitBtn = overlay.querySelector('button[type=submit]');
+      submitBtn.disabled = true;
+      const payload = {
+        penanganan_id: penangananId,
+        seksi_bm_id: overlay.querySelector('#ip-seksi').value || null,
+        kode_mata_pembayaran: overlay.querySelector('#ip-kode').value.trim(),
+        uraian_pekerjaan: overlay.querySelector('#ip-uraian').value.trim(),
+        satuan: overlay.querySelector('#ip-satuan').value.trim(),
+        urutan: overlay.querySelector('#ip-urutan').value || 0,
+      };
+      try{
+        if(isEdit){ await api.updateItemPekerjaan(editData.id, payload); }
+        else{ payload.created_by = state.user.id; await api.insertItemPekerjaan(payload); }
+        overlay.remove();
+        notifikasiToast('Item pekerjaan tersimpan.', 'success');
+        if(onSaved) onSaved();
+      }catch(err){
+        submitBtn.disabled = false;
+        errBox.textContent = terjemahkanErrorDb(err); errBox.classList.remove('hidden');
+      }
+    });
+  }).catch(err=>alert('Gagal memuat master seksi: '+terjemahkanErrorDb(err)));
+}
+
+function openDetailVolumeFormModal(itemPekerjaanId, editData, onSaved){
+  const isEdit = !!editData;
+  api.posisiRef().then(posisiList=>{
+    const overlay = openModal(`
+      <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
+      <h3 class="font-display font-extrabold text-lg mb-4">${isEdit?'Ubah':'Tambah'} Rincian Volume per STA</h3>
+      <form id="form-detail" class="space-y-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Nama Segmen / Lokasi</label><input id="dv-segmen" placeholder="Segmen I / Jembatan Kalalap 2" value="${editData?.nama_segmen||''}"></div>
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="text-[12.5px] font-semibold text-ink-600">Volume ADD</label><input id="dv-vol-add" type="number" step="0.01" value="${editData?.volume_add??''}"></div>
+          <div><label class="text-[12.5px] font-semibold text-ink-600">Volume Terpasang</label><input id="dv-vol-terpasang" type="number" step="0.01" value="${editData?.volume_terpasang??''}"></div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="text-[12.5px] font-semibold text-ink-600">STA Awal *</label><input id="dv-sta-awal" required placeholder="18+500" value="${editData?.sta_awal||''}"></div>
+          <div><label class="text-[12.5px] font-semibold text-ink-600">STA Akhir *</label><input id="dv-sta-akhir" required placeholder="18+900" value="${editData?.sta_akhir||''}"></div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="text-[12.5px] font-semibold text-ink-600">Panjang (M)</label><input id="dv-panjang" type="number" step="0.01" value="${editData?.panjang_m??''}"></div>
+          <div>
+            <label class="text-[12.5px] font-semibold text-ink-600">Posisi</label>
+            <input id="dv-posisi" list="dv-posisi-list" placeholder="Full / L / R / JK1…" value="${editData?.posisi||''}">
+            <datalist id="dv-posisi-list">${posisiList.map(p=>`<option value="${p.kode}">`).join('')}</datalist>
+          </div>
+        </div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Urutan Tampil</label><input id="dv-urutan" type="number" value="${editData?.urutan??0}"></div>
+        <div id="dv-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
+        <button type="submit" class="btn-primary w-full">Simpan</button>
+      </form>`);
+    overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+    overlay.querySelector('#form-detail').addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const errBox = overlay.querySelector('#dv-err');
+      const submitBtn = overlay.querySelector('button[type=submit]');
+      submitBtn.disabled = true;
+      const payload = {
+        item_pekerjaan_id: itemPekerjaanId,
+        nama_segmen: overlay.querySelector('#dv-segmen').value || null,
+        volume_add: overlay.querySelector('#dv-vol-add').value || null,
+        volume_terpasang: overlay.querySelector('#dv-vol-terpasang').value || null,
+        sta_awal: overlay.querySelector('#dv-sta-awal').value.trim(),
+        sta_akhir: overlay.querySelector('#dv-sta-akhir').value.trim(),
+        panjang_m: overlay.querySelector('#dv-panjang').value || null,
+        posisi: overlay.querySelector('#dv-posisi').value || null,
+        urutan: overlay.querySelector('#dv-urutan').value || 0,
+      };
+      try{
+        if(isEdit){ await api.updateDetailVolume(editData.id, payload); }
+        else{ payload.created_by = state.user.id; await api.insertDetailVolume(payload); }
+        overlay.remove();
+        notifikasiToast('Rincian STA tersimpan.', 'success');
+        if(onSaved) onSaved();
+      }catch(err){
+        submitBtn.disabled = false;
+        errBox.textContent = terjemahkanErrorDb(err); errBox.classList.remove('hidden');
+      }
+    });
+  }).catch(err=>alert('Gagal memuat referensi posisi: '+terjemahkanErrorDb(err)));
 }
 
 // --- 11c. MODAL: ANGGARAN TAHUNAN -------------------------------------
