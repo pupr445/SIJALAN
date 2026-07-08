@@ -220,60 +220,30 @@
        akan tetap otomatis terulang tiap halaman tanpa perlu sticky). */
     #item-pekerjaan-list .overflow-x-auto{ max-height:none !important; }
     #item-pekerjaan-list thead{ position:static !important; top:auto !important; }
-    /* Catatan: JANGAN tambahkan break-inside:avoid pada <tr> tabel ini —
-       kolom No/Mata Pembayaran/Sat memakai rowspan lintas beberapa baris
-       (judul item, rincian STA, ringkasan). break-inside:avoid per-baris
-       pada tabel ber-rowspan terbukti membuat Chrome menggandakan garis
-       batas baris saat mencetak (pernah dicoba & menyebabkan garis dobel
-       tepat di bawah baris judul item, mis. di bawah "Seksi 7.1 ..."). */
-
-    /* Perbaikan LANJUTAN garis dobel: ternyata bukan break-inside (sudah
-       dicabut di atas tapi garis dobel masih muncul) — penyebab
-       sesungguhnya adalah aturan di bawah yang tadinya memberi border PADA
-       KEEMPAT SISI setiap sel (`border:1px solid #888`). Berpapasan dengan
-       sel rowspan (No/Mata Pembayaran/Sat menyatu ke bawah beberapa
-       baris), border-collapse gagal menggabungkan garis atas satu sel
-       dengan garis bawah sel di atasnya secara sempurna di sekitar kolom
-       ber-rowspan, sehingga tampak 2 garis tipis berdempetan. Perbaikan:
-       setiap sel hanya digambar garis KANAN & BAWAH saja (bukan keempat
-       sisi) — garis atas & kiri tabel ditutup oleh border tabel itu
-       sendiri. Setiap garis horizontal/vertikal jadi hanya "dimiliki" satu
-       sel, sehingga tidak mungkin dobel walau ada rowspan. */
-    /* Perbaikan LANJUTAN #2: mengganti border-right+bottom saja ternyata
-       BELUM cukup — garis dobel masih muncul. Setelah ditelusuri lagi,
-       akar masalahnya adalah algoritma border-collapse Chrome sendiri saat
-       berhadapan dengan sel rowspan: dalam mode "collapse", Chrome
-       menghitung garis batas antar sel secara internal dan bisa salah
-       menggambar 2 garis tipis berdempetan di sekitar kolom ber-rowspan.
-       Solusi tuntas: pakai border-separate (+ border-spacing:0) sehingga
-       Chrome TIDAK melakukan penggabungan garis sama sekali — setiap sel
-       menggambar garisnya sendiri apa adanya, tanpa ambiguitas, walau ada
-       rowspan. Visualnya tetap terlihat seperti garis tunggal karena
-       border-spacing:0 merapatkan semua sel tanpa celah. */
+    /* Perbaikan TUNTAS garis dobel & coretan "L" di kolom No/Mata
+       Pembayaran/Sat (sudah dicoba 3 pendekatan sebelumnya — break-inside,
+       border kanan+bawah saja, lalu border-separate — semuanya masih
+       menyisakan garis dobel/coretan tipis di sekitar sel rowspan karena
+       akar masalahnya memang rowspan itu sendiri: Chrome punya bug lama
+       saat mem-print sel rowspan yang tingginya tidak pas dengan total
+       tinggi baris-baris di bawahnya, sehingga menyisipkan garis tambahan
+       tipis). Perbaikan tuntas dilakukan di JavaScript (lihat
+       renderItemPekerjaanList): kolom No/Mata Pembayaran/Sat TIDAK LAGI
+       pakai rowspan sama sekali — nilainya hanya ditulis di baris judul
+       item, baris-baris di bawahnya diberi sel kosong biasa di posisi
+       kolom yang sama. Tanpa rowspan, border-collapse standar bekerja
+       sempurna tanpa risiko garis dobel, walau border digambar per-sel. */
     #item-pekerjaan-list table{
       width:100% !important; min-width:0 !important; table-layout:auto;
-      font-size:10px !important; border-collapse:separate !important; border-spacing:0 !important;
-      border:1px solid #888 !important;
+      font-size:10px !important; border-collapse:collapse !important;
+      border:1px solid #000 !important;
     }
     #item-pekerjaan-list th, #item-pekerjaan-list td{
-      border:none !important; border-right:1px solid #888 !important; border-bottom:1px solid #888 !important;
+      border:none !important; border-right:1px solid #000 !important; border-bottom:1px solid #000 !important;
       padding:3px 4px !important;
       white-space:normal !important; word-break:normal !important; overflow-wrap:break-word;
       line-height:1.25; min-width:0 !important;
     }
-    /* Perbaikan LANJUTAN #3 (akar masalah sebenarnya): sel kolom No/Mata
-       Pembayaran/Sat memakai rowspan menutupi beberapa baris (judul item →
-       rincian STA → ringkasan) sebagai SATU kotak utuh. Garis bawahnya
-       seharusnya hanya tampil SEKALI di paling bawah kotak itu (sejajar
-       dengan baris ringkasan Progres/Total Panjang). Tapi karena aturan di
-       atas berlaku ke SEMUA <td> termasuk sel rowspan ini, Chrome ikut
-       menggambar garis bawahnya di batas baris bagian dalam (persis di
-       bawah baris judul item, sebelum baris rincian STA pertama) —
-       berdempetan dengan garis bawah baris judul itu sendiri sehingga
-       tampak dobel. Perbaikan: matikan border-bottom KHUSUS pada sel
-       ber-rowspan; garis penutup baris tetap ada karena sel-sel lain (yang
-       tidak rowspan) di baris yang sama tetap menggambar garisnya. */
-    #item-pekerjaan-list td[rowspan]{ border-bottom:none !important; }
     #item-pekerjaan-list th{
       text-transform:none !important; letter-spacing:0 !important; font-size:10px !important;
       text-align:center !important;
@@ -4082,10 +4052,24 @@ function renderItemPekerjaanList(overlay, kg){
       // Pekerjaan persis seperti lembar Backup Data kertas.
       const labelRowspan = hasRows ? rows.length + 2 : 1;
       const totalPanjang = rows.reduce((s,r)=>s+(Number(r.panjang_m)||0), 0);
+      // CATATAN PERBAIKAN GARIS DOBEL & CORETAN "L" SAAT CETAK (kolom No/
+      // Mata Pembayaran/Sat): sebelumnya kolom-kolom ini pakai rowspan agar
+      // menyatu ke bawah lintas baris judul item + rincian STA + ringkasan.
+      // Chrome punya bug lama saat mem-print sel rowspan yang tingginya
+      // tidak pas dengan total tinggi baris yang dinaunginya — Chrome bisa
+      // menyisipkan garis tipis tambahan di sekitar sel itu (tampak sebagai
+      // garis dobel di bawah "Seksi 7.1..." dan coretan mirip huruf "L" di
+      // sebelah "M3"). Perbaikan tuntas: TIDAK pakai rowspan sama sekali —
+      // nilai No/Mata Pembayaran/Sat hanya ditulis di baris judul item,
+      // baris-baris di bawahnya diberi sel kosong biasa (bukan rowspan) di
+      // posisi kolom yang sama. Tabel tanpa rowspan tidak pernah menghasilkan
+      // garis dobel saat dicetak, walau border-nya digambar per-sel.
       const noMataCells = `
-        <td rowspan="${labelRowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono">${no}</td>
-        <td rowspan="${labelRowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono whitespace-nowrap">${it.kode_mata_pembayaran}</td>`;
-      const satCell = `<td rowspan="${labelRowspan}" class="py-1.5 px-2 align-top border-t border-line">${it.satuan}</td>`;
+        <td class="py-1.5 px-2 align-top border-t border-line font-mono">${no}</td>
+        <td class="py-1.5 px-2 align-top border-t border-line font-mono whitespace-nowrap">${it.kode_mata_pembayaran}</td>`;
+      const noMataCellsKosong = `<td class="py-1.5 px-2 border-t border-line"></td><td class="py-1.5 px-2 border-t border-line"></td>`;
+      const satCell = `<td class="py-1.5 px-2 align-top border-t border-line">${it.satuan}</td>`;
+      const satCellKosong = `<td class="py-1.5 px-2 border-t border-line"></td>`;
       function uraianTd(extraContent){
         return `<td class="py-1.5 px-2 align-top border-t border-line font-medium min-w-[150px]">${extraContent}</td>`;
       }
@@ -4152,7 +4136,9 @@ function renderItemPekerjaanList(overlay, kg){
           const staAkhir = (r.sta_akhir||'').trim();
           const staAdaIsi = !!(staAwal || staAkhir);
           bodyRows.push(`<tr data-detail-id="${r.id}">
+            ${noMataCellsKosong}
             ${uraianTd(isiUraian)}
+            ${satCellKosong}
             <td class="py-1.5 px-2 border-t border-line"></td>
             <td class="py-1.5 px-2 border-t border-line font-mono text-right whitespace-nowrap">${r.volume_terpasang!=null?fmtNum(r.volume_terpasang,2,true):''}</td>
             <td class="py-1.5 px-2 border-t border-line font-mono whitespace-nowrap">${staAwal}</td>
@@ -4170,7 +4156,9 @@ function renderItemPekerjaanList(overlay, kg){
         // ditampilkan sejajar di bawah kolom Vol. Terpasang, dan Total Panjang
         // sejajar lurus di bawah kolom Panjang (M).
         bodyRows.push(`<tr class="bg-ink-50 font-semibold">
+          ${noMataCellsKosong}
           <td class="py-1 px-2 border-t border-line"></td>
+          ${satCellKosong}
           <td class="py-1 px-2 border-t border-line"></td>
           <td class="py-1 px-2 border-t border-line font-mono text-right whitespace-nowrap">${it.persen_progres!=null?'Progres '+fmtNum(it.persen_progres,2,true)+'%':'—'}</td>
           <td class="py-1 px-2 border-t border-line text-right" colspan="3">Total Panjang</td>
