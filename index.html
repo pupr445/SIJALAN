@@ -4053,11 +4053,33 @@ function renderItemPekerjaanList(overlay, kg){
           <td class="py-1.5 px-2 border-t border-line"></td>
           ${isEditor()?`<td class="py-1.5 px-2 border-t border-line no-print"></td>`:''}
         </tr>`);
-        let segmenSebelumnya = null;
+        // Hierarki 2 tingkat (lihat migration 027):
+        //  - induk_segmen  = kelompok besar, dicetak BOLD tiap kali berubah
+        //    (mis. "- Segmen I / Segmen Rekon", "- Segmen II / Segmen
+        //    Berkala"). Baris tanpa induk_segmen memakai nama_segmen-nya
+        //    sendiri sebagai induk (kompatibel dengan data lama).
+        //  - nama_segmen   = sub-label baris itu sendiri (mis. "Jembatan
+        //    Kalalap 2", "Deuker Eksisting"), dicetak ITALIC & sedikit
+        //    menjorok (nested) tiap kali berubah, TAPI TIDAK memicu
+        //    baris induk baru selama induk_segmen-nya masih sama —
+        //    persis seperti pada lembar Backup Data kertas di mana
+        //    Jembatan Kalalap 1/2, Langgar Jalan, dan Deuker Eksisting
+        //    tetap tercatat sebagai bagian dari Segmen I.
+        let indukSebelumnya = null;
+        let subLabelSebelumnya = null;
         rows.forEach((r,i)=>{
-          const segmenBerubah = (r.nama_segmen||'') !== segmenSebelumnya;
-          segmenSebelumnya = r.nama_segmen||'';
-          const isiUraian = (segmenBerubah && r.nama_segmen) ? `<div class="italic text-ink-500">- ${r.nama_segmen}</div>` : '';
+          const indukSekarang = (r.induk_segmen||r.nama_segmen||'').trim();
+          const indukBerubah = indukSekarang !== indukSebelumnya;
+          indukSebelumnya = indukSekarang;
+
+          const subLabelSekarang = (r.nama_segmen||'').trim();
+          const isSubBagian = subLabelSekarang && subLabelSekarang !== indukSekarang;
+          const subLabelBerubah = subLabelSekarang !== subLabelSebelumnya;
+          subLabelSebelumnya = subLabelSekarang;
+
+          let isiUraian = '';
+          if(indukBerubah && indukSekarang) isiUraian += `<div class="font-semibold text-ink-600">- ${indukSekarang}</div>`;
+          if(isSubBagian && (subLabelBerubah || indukBerubah)) isiUraian += `<div class="italic text-ink-500 pl-3">${subLabelSekarang}</div>`;
           bodyRows.push(`<tr data-detail-id="${r.id}">
             ${uraianTd(isiUraian)}
             <td class="py-1.5 px-2 border-t border-line"></td>
@@ -4230,7 +4252,8 @@ function openDetailVolumeFormModal(itemPekerjaanId, editData, onSaved){
       <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
       <h3 class="font-display font-extrabold text-lg mb-4">${isEdit?'Ubah':'Tambah'} Rincian Volume per STA</h3>
       <form id="form-detail" class="space-y-3">
-        <div><label class="text-[12.5px] font-semibold text-ink-600">Nama Segmen / Lokasi</label><input id="dv-segmen" placeholder="Segmen I / Jembatan Kalalap 2" value="${editData?.nama_segmen||''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Segmen Induk</label><input id="dv-induk-segmen" placeholder="Segmen I / Segmen Rekon" value="${editData?.induk_segmen||''}"><p class="text-[11px] text-ink-400 mt-0.5">Kelompok besar. Isi sama untuk semua baris yang masih satu Segmen (mis. Jembatan Kalalap 1/2, Deuker Eksisting tetap "Segmen I / Segmen Rekon").</p></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Nama Item / Sub-bagian</label><input id="dv-segmen" placeholder="Jembatan Kalalap 2 / Deuker Eksisting (kosongkan bila sama dgn Segmen Induk)" value="${editData?.nama_segmen||''}"><p class="text-[11px] text-ink-400 mt-0.5">Isi hanya bila baris ini punya nama struktur/lokasi sendiri yang berbeda dari Segmen Induk.</p></div>
         <div class="grid grid-cols-2 gap-3">
           <div><label class="text-[12.5px] font-semibold text-ink-600">Volume ADD</label><input id="dv-vol-add" type="number" step="0.01" value="${editData?.volume_add??''}"></div>
           <div><label class="text-[12.5px] font-semibold text-ink-600">Volume Terpasang</label><input id="dv-vol-terpasang" type="number" step="0.01" value="${editData?.volume_terpasang??''}"></div>
@@ -4259,6 +4282,7 @@ function openDetailVolumeFormModal(itemPekerjaanId, editData, onSaved){
       submitBtn.disabled = true;
       const payload = {
         item_pekerjaan_id: itemPekerjaanId,
+        induk_segmen: overlay.querySelector('#dv-induk-segmen').value || null,
         nama_segmen: overlay.querySelector('#dv-segmen').value || null,
         volume_add: overlay.querySelector('#dv-vol-add').value || null,
         volume_terpasang: overlay.querySelector('#dv-vol-terpasang').value || null,
