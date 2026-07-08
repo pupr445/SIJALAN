@@ -239,9 +239,20 @@
        sisi) — garis atas & kiri tabel ditutup oleh border tabel itu
        sendiri. Setiap garis horizontal/vertikal jadi hanya "dimiliki" satu
        sel, sehingga tidak mungkin dobel walau ada rowspan. */
+    /* Perbaikan LANJUTAN #2: mengganti border-right+bottom saja ternyata
+       BELUM cukup — garis dobel masih muncul. Setelah ditelusuri lagi,
+       akar masalahnya adalah algoritma border-collapse Chrome sendiri saat
+       berhadapan dengan sel rowspan: dalam mode "collapse", Chrome
+       menghitung garis batas antar sel secara internal dan bisa salah
+       menggambar 2 garis tipis berdempetan di sekitar kolom ber-rowspan.
+       Solusi tuntas: pakai border-separate (+ border-spacing:0) sehingga
+       Chrome TIDAK melakukan penggabungan garis sama sekali — setiap sel
+       menggambar garisnya sendiri apa adanya, tanpa ambiguitas, walau ada
+       rowspan. Visualnya tetap terlihat seperti garis tunggal karena
+       border-spacing:0 merapatkan semua sel tanpa celah. */
     #item-pekerjaan-list table{
       width:100% !important; min-width:0 !important; table-layout:auto;
-      font-size:10px !important; border-collapse:collapse !important;
+      font-size:10px !important; border-collapse:separate !important; border-spacing:0 !important;
       border:1px solid #888 !important;
     }
     #item-pekerjaan-list th, #item-pekerjaan-list td{
