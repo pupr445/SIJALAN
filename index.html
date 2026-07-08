@@ -227,12 +227,26 @@
        batas baris saat mencetak (pernah dicoba & menyebabkan garis dobel
        tepat di bawah baris judul item, mis. di bawah "Seksi 7.1 ..."). */
 
+    /* Perbaikan LANJUTAN garis dobel: ternyata bukan break-inside (sudah
+       dicabut di atas tapi garis dobel masih muncul) — penyebab
+       sesungguhnya adalah aturan di bawah yang tadinya memberi border PADA
+       KEEMPAT SISI setiap sel (`border:1px solid #888`). Berpapasan dengan
+       sel rowspan (No/Mata Pembayaran/Sat menyatu ke bawah beberapa
+       baris), border-collapse gagal menggabungkan garis atas satu sel
+       dengan garis bawah sel di atasnya secara sempurna di sekitar kolom
+       ber-rowspan, sehingga tampak 2 garis tipis berdempetan. Perbaikan:
+       setiap sel hanya digambar garis KANAN & BAWAH saja (bukan keempat
+       sisi) — garis atas & kiri tabel ditutup oleh border tabel itu
+       sendiri. Setiap garis horizontal/vertikal jadi hanya "dimiliki" satu
+       sel, sehingga tidak mungkin dobel walau ada rowspan. */
     #item-pekerjaan-list table{
       width:100% !important; min-width:0 !important; table-layout:auto;
       font-size:10px !important; border-collapse:collapse !important;
+      border:1px solid #888 !important;
     }
     #item-pekerjaan-list th, #item-pekerjaan-list td{
-      border:1px solid #888 !important; padding:3px 4px !important;
+      border:none !important; border-right:1px solid #888 !important; border-bottom:1px solid #888 !important;
+      padding:3px 4px !important;
       white-space:normal !important; word-break:normal !important; overflow-wrap:break-word;
       line-height:1.25; min-width:0 !important;
     }
