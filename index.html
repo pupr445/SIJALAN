@@ -4060,8 +4060,8 @@ function renderItemPekerjaanList(overlay, kg){
           const isiUraian = (segmenBerubah && r.nama_segmen) ? `<div class="italic text-ink-500">- ${r.nama_segmen}</div>` : '';
           bodyRows.push(`<tr data-detail-id="${r.id}">
             ${uraianTd(isiUraian)}
-            <td class="py-1.5 px-2 border-t border-line"></td>
-            <td class="py-1.5 px-2 border-t border-line"></td>
+            <td class="py-1.5 px-2 border-t border-line font-mono text-right whitespace-nowrap">${r.volume_add!=null?fmtNum(r.volume_add,2,true):''}</td>
+            <td class="py-1.5 px-2 border-t border-line font-mono text-right whitespace-nowrap">${r.volume_terpasang!=null?fmtNum(r.volume_terpasang,2,true):''}</td>
             <td class="py-1.5 px-2 border-t border-line font-mono whitespace-nowrap">${r.sta_awal}</td>
             <td class="py-1.5 px-2 border-t border-line text-center text-ink-400">s.d.</td>
             <td class="py-1.5 px-2 border-t border-line font-mono whitespace-nowrap">${r.sta_akhir}</td>
