@@ -4260,8 +4260,9 @@ function openItemPekerjaanFormModal(penangananId, editData, onSaved){
         <div><label class="text-[12.5px] font-semibold text-ink-600">Uraian Pekerjaan *</label><input id="ip-uraian" required value="${editData?.uraian_pekerjaan||''}"></div>
         <div class="grid grid-cols-2 gap-3">
           <div><label class="text-[12.5px] font-semibold text-ink-600">Satuan *</label><input id="ip-satuan" required placeholder="M3 / M2 / Ls" value="${editData?.satuan||''}"></div>
-          <div><label class="text-[12.5px] font-semibold text-ink-600">Urutan Tampil</label><input id="ip-urutan" type="number" value="${editData?.urutan??0}"></div>
+          <div><label class="text-[12.5px] font-semibold text-ink-600">Volume ADD</label><input id="ip-vol-add" type="number" step="0.01" placeholder="Volume kontrak/addendum" value="${editData?.total_volume_add??''}"></div>
         </div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Urutan Tampil</label><input id="ip-urutan" type="number" value="${editData?.urutan??0}"></div>
         <div id="ip-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
         <button type="submit" class="btn-primary w-full">Simpan</button>
       </form>`);
@@ -4289,6 +4290,7 @@ function openItemPekerjaanFormModal(penangananId, editData, onSaved){
         kode_mata_pembayaran: overlay.querySelector('#ip-kode').value.trim(),
         uraian_pekerjaan: overlay.querySelector('#ip-uraian').value.trim(),
         satuan: overlay.querySelector('#ip-satuan').value.trim(),
+        volume_add: overlay.querySelector('#ip-vol-add').value || null,
         urutan: overlay.querySelector('#ip-urutan').value || 0,
       };
       try{
@@ -4314,10 +4316,7 @@ function openDetailVolumeFormModal(itemPekerjaanId, editData, onSaved){
       <form id="form-detail" class="space-y-3">
         <div><label class="text-[12.5px] font-semibold text-ink-600">Segmen Induk</label><input id="dv-induk-segmen" placeholder="Segmen I / Segmen Rekon" value="${editData?.induk_segmen||''}"><p class="text-[11px] text-ink-400 mt-0.5">Kelompok besar. Isi sama untuk semua baris yang masih satu Segmen (mis. Jembatan Kalalap 1/2, Deuker Eksisting tetap "Segmen I / Segmen Rekon").</p></div>
         <div><label class="text-[12.5px] font-semibold text-ink-600">Nama Item / Sub-bagian</label><input id="dv-segmen" placeholder="Jembatan Kalalap 2 / Deuker Eksisting (kosongkan bila sama dgn Segmen Induk)" value="${editData?.nama_segmen||''}"><p class="text-[11px] text-ink-400 mt-0.5">Isi hanya bila baris ini punya nama struktur/lokasi sendiri yang berbeda dari Segmen Induk.</p></div>
-        <div class="grid grid-cols-2 gap-3">
-          <div><label class="text-[12.5px] font-semibold text-ink-600">Volume ADD</label><input id="dv-vol-add" type="number" step="0.01" value="${editData?.volume_add??''}"></div>
-          <div><label class="text-[12.5px] font-semibold text-ink-600">Volume Terpasang</label><input id="dv-vol-terpasang" type="number" step="0.01" value="${editData?.volume_terpasang??''}"></div>
-        </div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Volume Terpasang</label><input id="dv-vol-terpasang" type="number" step="0.01" value="${editData?.volume_terpasang??''}"></div>
         <div class="grid grid-cols-2 gap-3">
           <div><label class="text-[12.5px] font-semibold text-ink-600">STA Awal</label><input id="dv-sta-awal" placeholder="18+500 (opsional)" value="${editData?.sta_awal||''}"></div>
           <div><label class="text-[12.5px] font-semibold text-ink-600">STA Akhir</label><input id="dv-sta-akhir" placeholder="18+900 (opsional)" value="${editData?.sta_akhir||''}"></div>
@@ -4344,7 +4343,6 @@ function openDetailVolumeFormModal(itemPekerjaanId, editData, onSaved){
         item_pekerjaan_id: itemPekerjaanId,
         induk_segmen: overlay.querySelector('#dv-induk-segmen').value || null,
         nama_segmen: overlay.querySelector('#dv-segmen').value || null,
-        volume_add: overlay.querySelector('#dv-vol-add').value || null,
         volume_terpasang: overlay.querySelector('#dv-vol-terpasang').value || null,
         sta_awal: overlay.querySelector('#dv-sta-awal').value.trim() || null,
         sta_akhir: overlay.querySelector('#dv-sta-akhir').value.trim() || null,
