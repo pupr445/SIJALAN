@@ -195,15 +195,30 @@
     body.modal-printing .modal-overlay .card{ box-shadow:none !important; max-height:none !important; overflow:visible !important; border:none !important; }
 
     /* Perbaikan: tabel "Rincian Mata Pembayaran (Backup Volume)" pada Lembar
-       Kegiatan Penanganan terpotong saat dicetak, karena wadahnya
-       (overflow-x-auto) tetap membatasi/menyembunyikan lebar tabel yang
-       lebih lebar (min-w-[860px]) daripada lebar kertas. Saat cetak, lepas
-       batas lebar tersebut, biarkan tabel menyusut mengikuti lebar kertas,
-       dan biarkan teks pada sel membungkus (bukan nowrap) supaya tidak
-       ada kolom yang hilang/terpotong. */
+       Kegiatan Penanganan terpotong / berantakan saat dicetak. Penyebabnya
+       dua hal: (1) wadahnya (overflow-x-auto) tetap membatasi lebar tabel
+       yang lebih lebar (min-w-[860px]) daripada lebar kertas, dan (2) kertas
+       potret terlalu sempit untuk memuat semua kolom (No, Mata Pembayaran,
+       Uraian, Sat, Vol ADD/Terpasang, Segmen, STA Awal/Akhir, Panjang,
+       Posisi) tanpa kata terpotong paksa di tengah. Perbaikan: cetak lembar
+       ini dalam orientasi LANSKAP (lebih lebar, meniru lembar Backup Data
+       kertas), lepas batas lebar tabel, dan rapikan gaya sel meniru format
+       kertas (garis tegas, tanpa huruf besar semua/spasi huruf berlebih). */
+    @page kegiatan-cetak{ size: landscape; margin: 12mm 10mm; }
+    body.modal-printing{ page: kegiatan-cetak; }
     .overflow-x-auto{ overflow:visible !important; }
-    #item-pekerjaan-list table{ width:100% !important; min-width:0 !important; table-layout:auto; font-size:9.5px !important; }
-    #item-pekerjaan-list th, #item-pekerjaan-list td{ white-space:normal !important; word-break:break-word; padding:2px 3px !important; }
+    #item-pekerjaan-list table{
+      width:100% !important; min-width:0 !important; table-layout:auto;
+      font-size:10px !important; border-collapse:collapse !important;
+    }
+    #item-pekerjaan-list th, #item-pekerjaan-list td{
+      border:1px solid #888 !important; padding:3px 4px !important;
+      white-space:normal !important; word-break:normal !important; overflow-wrap:break-word;
+      line-height:1.25; min-width:0 !important;
+    }
+    #item-pekerjaan-list th{
+      text-transform:none !important; letter-spacing:0 !important; font-size:10px !important;
+    }
   }
   .print-title{ display:none; }
 </style>
