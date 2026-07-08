@@ -4091,8 +4091,8 @@ function renderItemPekerjaanList(overlay, kg){
             <td class="py-1.5 px-2 border-t border-line font-mono whitespace-nowrap">${staAwal}</td>
             <td class="py-1.5 px-2 border-t border-line text-center text-ink-400">${staAdaIsi?'s.d.':''}</td>
             <td class="py-1.5 px-2 border-t border-line font-mono whitespace-nowrap">${staAkhir}</td>
-            <td class="py-1.5 px-2 border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(r.panjang_m,2,true)}</td>
-            <td class="py-1.5 px-2 border-t border-line text-center whitespace-nowrap">${r.posisi||'—'}</td>
+            <td class="py-1.5 px-2 border-t border-line font-mono text-right whitespace-nowrap">${r.panjang_m!=null&&r.panjang_m!==''?fmtNum(r.panjang_m,2,true):''}</td>
+            <td class="py-1.5 px-2 border-t border-line text-center whitespace-nowrap">${r.posisi||''}</td>
             ${isEditor()?`<td class="py-1.5 px-2 border-t border-line whitespace-nowrap no-print sticky right-0 z-10 bg-white shadow-[-4px_0_4px_-2px_rgba(0,0,0,0.06)]">
               <button data-edit-detail="${r.id}" data-item-id="${it.id}" class="text-ink-400 hover:text-navy-700">${icon('edit','w-3.5 h-3.5')}</button>
               <button data-hapus-detail="${r.id}" data-item-id="${it.id}" class="text-ink-400 hover:text-[var(--bad)]">${icon('trash','w-3.5 h-3.5')}</button>
