@@ -1544,6 +1544,10 @@ const api = {
   async konsultanList(){ const {data,error} = await sb.from('konsultan').select('*').order('nama'); if(error) throw error; return data; },
   async insertKonsultan(payload){ const {data,error} = await sb.from('konsultan').insert(payload).select().single(); if(error) throw error; return data; },
 
+  // --- kontraktor ---
+  async kontraktorList(){ const {data,error} = await sb.from('kontraktor').select('*').order('nama'); if(error) throw error; return data; },
+  async insertKontraktor(payload){ const {data,error} = await sb.from('kontraktor').insert(payload).select().single(); if(error) throw error; return data; },
+
   // --- kontrak (No. Kontrak, Addendum, Nilai, Waktu Pelaksana, Konsultan) ---
   async kontrakByPenanganan(penangananId){ const {data,error} = await sb.from('kontrak').select('*').eq('penanganan_id',penangananId).maybeSingle(); if(error) throw error; return data; },
   async laporanPaket(penangananId){ const {data,error} = await sb.from('v_laporan_paket').select('*').eq('penanganan_id',penangananId).maybeSingle(); if(error) throw error; return data; },
@@ -3905,7 +3909,15 @@ function renderKontrakInfo(overlay, kg){
 }
 
 function openKontrakFormModal(penangananId, onSaved){
-  Promise.all([api.kontrakByPenanganan(penangananId), api.konsultanList()]).then(([kontrak, konsultanList])=>{
+  // kontraktor_id ada di tabel `penanganan` (bukan `kontrak`), jadi perlu diambil
+  // terpisah lewat penangananById supaya select "Kontraktor Pelaksana" bisa
+  // menampilkan pilihan yang sedang aktif.
+  Promise.all([
+    api.kontrakByPenanganan(penangananId),
+    api.konsultanList(),
+    api.kontraktorList(),
+    api.penangananById(penangananId),
+  ]).then(([kontrak, konsultanList, kontraktorList, penanganan])=>{
     const overlay = openModal(`
       <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
       <h3 class="font-display font-extrabold text-lg mb-4">Data Kontrak &amp; Konsultan</h3>
@@ -3925,6 +3937,19 @@ function openKontrakFormModal(penangananId, onSaved){
           <div><label class="text-[12.5px] font-semibold text-ink-600">Selesai</label><input id="kn-selesai" type="date" value="${kontrak?.tgl_akhir_pelaksana||''}"></div>
         </div>
         <div>
+          <label class="text-[12.5px] font-semibold text-ink-600">Kontraktor Pelaksana</label>
+          <select id="kn-kontraktor">
+            <option value="">— Pilih kontraktor —</option>
+            ${kontraktorList.map(k=>`<option value="${k.id}" ${penanganan?.kontraktor_id===k.id?'selected':''}>${k.nama}</option>`).join('')}
+            <option value="__new__">+ Tambah kontraktor baru…</option>
+          </select>
+          <div id="kn-kontraktor-new" class="hidden grid grid-cols-2 gap-2 mt-2">
+            <input id="kn-kontraktor-nama" placeholder="Nama kontraktor" class="col-span-2">
+            <input id="kn-kontraktor-direktur" placeholder="Nama direktur">
+            <input id="kn-kontraktor-telp" placeholder="No. HP direktur">
+          </div>
+        </div>
+        <div>
           <label class="text-[12.5px] font-semibold text-ink-600">Konsultan Pengawas</label>
           <select id="kn-konsultan">
             <option value="">— Pilih konsultan —</option>
@@ -3942,6 +3967,9 @@ function openKontrakFormModal(penangananId, onSaved){
         <button type="submit" class="btn-primary w-full">Simpan</button>
       </form>`);
     overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+    overlay.querySelector('#kn-kontraktor').addEventListener('change', (e)=>{
+      overlay.querySelector('#kn-kontraktor-new').classList.toggle('hidden', e.target.value!=='__new__');
+    });
     overlay.querySelector('#kn-konsultan').addEventListener('change', (e)=>{
       overlay.querySelector('#kn-konsultan-new').classList.toggle('hidden', e.target.value!=='__new__');
     });
@@ -3951,6 +3979,17 @@ function openKontrakFormModal(penangananId, onSaved){
       const submitBtn = overlay.querySelector('button[type=submit]');
       submitBtn.disabled = true;
       try{
+        let kontraktorId = overlay.querySelector('#kn-kontraktor').value || null;
+        if(kontraktorId === '__new__'){
+          const nama = overlay.querySelector('#kn-kontraktor-nama').value.trim();
+          if(!nama) throw new Error('Nama kontraktor wajib diisi.');
+          const created = await api.insertKontraktor({
+            nama,
+            kontak_pic: overlay.querySelector('#kn-kontraktor-direktur').value || null,
+            telepon: overlay.querySelector('#kn-kontraktor-telp').value || null,
+          });
+          kontraktorId = created.id;
+        }
         let konsultanId = overlay.querySelector('#kn-konsultan').value || null;
         if(konsultanId === '__new__'){
           const nama = overlay.querySelector('#kn-konsultan-nama').value.trim();
@@ -3975,6 +4014,8 @@ function openKontrakFormModal(penangananId, onSaved){
           status_update: overlay.querySelector('#kn-status-update').value || null,
         };
         await api.upsertKontrak(penangananId, payload);
+        // kontraktor_id disimpan di tabel `penanganan`, terpisah dari `kontrak`.
+        await api.updatePenanganan(penangananId, { kontraktor_id: kontraktorId });
         overlay.remove();
         notifikasiToast('Data kontrak tersimpan.', 'success');
         if(onSaved) onSaved();
