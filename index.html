@@ -592,7 +592,7 @@ function formatBarisUntukExcel(rows){
 function isEditor(){ return state.profile && ['admin','kepala_bidang','petugas_lapangan'].includes(state.profile.role); }
 function isAdmin(){ return state.profile && state.profile.role === 'admin'; }
 function isPenugas(){ return state.profile && ['admin','kepala_bidang'].includes(state.profile.role); }
-function fmtNum(n, d=0){ if(n===null||n===undefined) return '—'; return Number(n).toLocaleString('id-ID',{maximumFractionDigits:d}); }
+function fmtNum(n, d=0, force=false){ if(n===null||n===undefined) return '—'; return Number(n).toLocaleString('id-ID',{minimumFractionDigits:force?d:0, maximumFractionDigits:d}); }
 function fmtRp(n){ if(n===null||n===undefined) return '—'; return 'Rp ' + Number(n).toLocaleString('id-ID',{maximumFractionDigits:0}); }
 function fmtDate(d){ if(!d) return '—'; return new Date(d).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}); }
 
@@ -3955,7 +3955,7 @@ function renderItemPekerjaanList(overlay, kg){
       const rows = detailMap[it.id] || [];
       if(it.divisi_nomor !== lastDivisi){
         lastDivisi = it.divisi_nomor;
-        bodyRows.push(`<tr class="bg-navy-50/70"${firstGroup?'':' '}><td colspan="${isEditor()?13:12}" class="py-1.5 px-2 font-display font-bold text-[12.5px] text-navy-800 border-t border-line">${it.divisi_nomor?`DIVISI ${it.divisi_nomor} — ${(it.divisi_nama||'').toUpperCase()}`:'TANPA REFERENSI DIVISI'}</td></tr>`);
+        bodyRows.push(`<tr class="bg-navy-50/70"${firstGroup?'':' '}><td colspan="${isEditor()?14:13}" class="py-1.5 px-2 font-display font-bold text-[12.5px] text-navy-800 border-t border-line">${it.divisi_nomor?`DIVISI ${it.divisi_nomor} — ${(it.divisi_nama||'').toUpperCase()}`:'TANPA REFERENSI DIVISI'}</td></tr>`);
         firstGroup = false;
       }
       no++;
@@ -3970,13 +3970,12 @@ function renderItemPekerjaanList(overlay, kg){
             <button data-tambah-detail="${it.id}" class="text-navy-700 font-semibold underline text-[11px]" title="Tambah baris STA">+ Baris STA</button>
           </div>`:''}</td>
         <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line">${it.satuan}</td>
-        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_add,2)}</td>
-        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_terpasang,2)}</td>
-        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${it.persen_progres!=null?fmtNum(it.persen_progres,2)+'%':'—'}</td>`;
+        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_add,2,true)}</td>
+        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_terpasang,2,true)}</td>
+        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${it.persen_progres!=null?fmtNum(it.persen_progres,2,true)+'%':'—'}</td>`;
       if(!rows.length){
         bodyRows.push(`<tr>${firstCells}
-          <td class="py-1.5 px-2 border-t border-line text-ink-400 text-center" colspan="4">— belum ada rincian STA —</td>
-          <td class="py-1.5 px-2 border-t border-line text-ink-400 text-center">—</td>
+          <td class="py-1.5 px-2 border-t border-line text-ink-400 text-center" colspan="6">— belum ada rincian STA —</td>
           ${isEditor()?`<td class="py-1.5 px-2 border-t border-line no-print"></td>`:''}
         </tr>`);
       } else {
@@ -3987,7 +3986,7 @@ function renderItemPekerjaanList(overlay, kg){
             <td class="py-1.5 px-2 border-t border-line font-mono whitespace-nowrap">${r.sta_awal}</td>
             <td class="py-1.5 px-2 border-t border-line text-center text-ink-400">s.d.</td>
             <td class="py-1.5 px-2 border-t border-line font-mono whitespace-nowrap">${r.sta_akhir}</td>
-            <td class="py-1.5 px-2 border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(r.panjang_m,2)}</td>
+            <td class="py-1.5 px-2 border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(r.panjang_m,2,true)}</td>
             <td class="py-1.5 px-2 border-t border-line text-center whitespace-nowrap">${r.posisi||'—'}</td>
             ${isEditor()?`<td class="py-1.5 px-2 border-t border-line whitespace-nowrap no-print">
               <button data-edit-detail="${r.id}" data-item-id="${it.id}" class="text-ink-400 hover:text-navy-700">${icon('edit','w-3.5 h-3.5')}</button>
@@ -3997,7 +3996,7 @@ function renderItemPekerjaanList(overlay, kg){
         });
         bodyRows.push(`<tr class="bg-ink-50 font-semibold">
           <td class="py-1 px-2 border-t border-line text-right" colspan="4">Total Panjang</td>
-          <td class="py-1 px-2 border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(totalPanjang,2)}</td>
+          <td class="py-1 px-2 border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(totalPanjang,2,true)}</td>
           <td class="py-1 px-2 border-t border-line"></td>
           ${isEditor()?`<td class="py-1 px-2 border-t border-line no-print"></td>`:''}
         </tr>`);
@@ -4009,18 +4008,23 @@ function renderItemPekerjaanList(overlay, kg){
         <table class="w-full text-[12px] border-collapse min-w-[860px]">
           <thead>
             <tr class="text-ink-500 text-left bg-ink-50">
-              <th class="py-1.5 px-2 font-semibold">No</th>
-              <th class="py-1.5 px-2 font-semibold">Mata Pembayaran</th>
-              <th class="py-1.5 px-2 font-semibold">Uraian Pekerjaan</th>
-              <th class="py-1.5 px-2 font-semibold">Sat</th>
-              <th class="py-1.5 px-2 font-semibold text-right">Vol. ADD</th>
-              <th class="py-1.5 px-2 font-semibold text-right">Vol. Terpasang</th>
-              <th class="py-1.5 px-2 font-semibold text-right whitespace-nowrap">Progres %</th>
-              <th class="py-1.5 px-2 font-semibold whitespace-nowrap">Segmen / STA</th>
-              <th class="py-1.5 px-2 font-semibold" colspan="2"></th>
-              <th class="py-1.5 px-2 font-semibold text-right whitespace-nowrap">Panjang (M)</th>
-              <th class="py-1.5 px-2 font-semibold text-center">Posisi</th>
-              ${isEditor()?`<th class="py-1.5 px-2 no-print"></th>`:''}
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">No</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">Mata Pembayaran</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">Uraian Pekerjaan</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">Sat</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold text-right align-bottom border-b border-line">Vol. ADD</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold text-right align-bottom border-b border-line">Vol. Terpasang</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold text-right align-bottom border-b border-line whitespace-nowrap">Progres %</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line whitespace-nowrap">Segmen</th>
+              <th colspan="3" class="py-1 px-2 font-semibold text-center border-b border-line">STA</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold text-right align-bottom border-b border-line whitespace-nowrap">Panjang (M)</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold text-center align-bottom border-b border-line">Posisi</th>
+              ${isEditor()?`<th rowspan="2" class="py-1.5 px-2 no-print"></th>`:''}
+            </tr>
+            <tr class="text-ink-500 text-left bg-ink-50">
+              <th class="py-1 px-2 font-semibold whitespace-nowrap">STA Awal</th>
+              <th class="py-1 px-2 font-semibold"></th>
+              <th class="py-1 px-2 font-semibold whitespace-nowrap">STA Akhir</th>
             </tr>
           </thead>
           <tbody>${bodyRows.join('')}</tbody>
