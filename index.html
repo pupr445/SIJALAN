@@ -193,6 +193,17 @@
     body.modal-printing #root{ display:none !important; }
     body.modal-printing .modal-overlay{ position:static !important; background:none !important; padding:0 !important; }
     body.modal-printing .modal-overlay .card{ box-shadow:none !important; max-height:none !important; overflow:visible !important; border:none !important; }
+
+    /* Perbaikan: tabel "Rincian Mata Pembayaran (Backup Volume)" pada Lembar
+       Kegiatan Penanganan terpotong saat dicetak, karena wadahnya
+       (overflow-x-auto) tetap membatasi/menyembunyikan lebar tabel yang
+       lebih lebar (min-w-[860px]) daripada lebar kertas. Saat cetak, lepas
+       batas lebar tersebut, biarkan tabel menyusut mengikuti lebar kertas,
+       dan biarkan teks pada sel membungkus (bukan nowrap) supaya tidak
+       ada kolom yang hilang/terpotong. */
+    .overflow-x-auto{ overflow:visible !important; }
+    #item-pekerjaan-list table{ width:100% !important; min-width:0 !important; table-layout:auto; font-size:9.5px !important; }
+    #item-pekerjaan-list th, #item-pekerjaan-list td{ white-space:normal !important; word-break:break-word; padding:2px 3px !important; }
   }
   .print-title{ display:none; }
 </style>
@@ -3760,10 +3771,7 @@ function openKegiatanDetailModal(kg){
       <h4 class="font-display font-bold text-[14px]">Rincian Mata Pembayaran (Backup Volume)</h4>
       ${isEditor()?`<button data-tambah-item class="no-print text-[12px] text-navy-700 font-semibold underline">+ Tambah Item</button>`:''}
     </div>
-    <div id="item-pekerjaan-list" class="text-[13px] mb-4"><div class="skel h-24 w-full"></div></div>
-
-    <h4 class="font-display font-bold text-[14px] mb-2">Kelengkapan Dokumen</h4>
-    <div id="dok-matrix" class="text-[13px]"><div class="skel h-32 w-full"></div></div>
+    <div id="item-pekerjaan-list" class="text-[13px]"><div class="skel h-24 w-full"></div></div>
   `);
   overlay.querySelector('div.card').classList.add('!max-w-4xl');
   overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
@@ -3778,42 +3786,9 @@ function openKegiatanDetailModal(kg){
   overlay.querySelector('[data-tambah-item]')?.addEventListener('click', ()=>{
     openItemPekerjaanFormModal(kg.id, null, ()=>renderItemPekerjaanList(overlay, kg));
   });
-
-  api.dokumenMatrix(kg.id).then(rows=>{
-    const box = overlay.querySelector('#dok-matrix');
-    if(!rows.length){ box.innerHTML = `<p class="text-ink-400">Belum ada daftar dokumen (kemungkinan trigger otomatis belum berjalan).</p>`; return; }
-    const byTahap = {};
-    rows.forEach(r=>{ (byTahap[r.tahap_nama] ??= []).push(r); });
-    box.innerHTML = Object.entries(byTahap).map(([tahap, docs])=>`
-      <div class="mb-3">
-        <div class="font-semibold text-ink-700 mb-1.5">${tahap}</div>
-        ${docs.map(d=>`
-          <div class="flex items-center gap-2 py-1.5 border-b border-line last:border-0" data-dokid="${d.dokumen_id}">
-            <button data-toggle class="w-5 h-5 rounded border ${d.status==='sudah'?'bg-[var(--good)] border-[var(--good)] text-white':'border-line'} flex items-center justify-center shrink-0" ${isEditor()?'':'disabled'}>${d.status==='sudah'?icon('check','w-3.5 h-3.5'):''}</button>
-            <span class="flex-1 ${d.status==='sudah'?'':'text-ink-500'}">${d.nama_dokumen}${d.wajib?'':' <span class=\"text-ink-400\">(opsional)</span>'}</span>
-            ${isEditor()?`<input data-link placeholder="Link dokumen" value="${d.link_dokumen||''}" class="!w-40 !py-1 text-[12px]">`:(d.link_dokumen?`<a href="${d.link_dokumen}" target="_blank" class="text-navy-700 text-[12px] underline">Buka</a>`:'')}
-          </div>`).join('')}
-      </div>`).join('');
-    if(isEditor()){
-      box.querySelectorAll('[data-dokid]').forEach(row=>{
-        const dokId = row.dataset.dokid;
-        const rowData = rows.find(r=>r.dokumen_id===dokId);
-        row.querySelector('[data-toggle]').addEventListener('click', async (e)=>{
-          const newStatus = rowData.status==='sudah' ? 'belum' : 'sudah';
-          try{
-            await api.updateDokumen(dokId, {status:newStatus, tanggal_update:new Date().toISOString(), uploaded_by:state.user.id});
-            rowData.status = newStatus;
-            e.currentTarget.className = `w-5 h-5 rounded border ${newStatus==='sudah'?'bg-[var(--good)] border-[var(--good)] text-white':'border-line'} flex items-center justify-center shrink-0`;
-            e.currentTarget.innerHTML = newStatus==='sudah'?icon('check','w-3.5 h-3.5'):'';
-          }catch(err){ alert('Gagal memperbarui status dokumen: '+terjemahkanErrorDb(err)); }
-        });
-        row.querySelector('[data-link]').addEventListener('change', async (e)=>{
-          try{ await api.updateDokumen(dokId, {link_dokumen: e.target.value || null, tanggal_update:new Date().toISOString(), uploaded_by:state.user.id}); }
-          catch(err){ alert('Gagal menyimpan link: '+terjemahkanErrorDb(err)); }
-        });
-      });
-    }
-  }).catch(err=>{ overlay.querySelector('#dok-matrix').innerHTML = errorPanel(err); });
+  // Catatan: bagian "Kelengkapan Dokumen" sengaja dihilangkan dari modal ini —
+  // sudah ada menu tersendiri (menu "Dokumen" / viewDokumen) untuk mengisi
+  // kelengkapan dokumen, dan kehadirannya di sini mengganggu tampilan cetak.
 }
 
 // --- 11b-1. DATA KONTRAK & KONSULTAN (bagian header paket, mengacu format Backup Data) ---
@@ -3980,7 +3955,7 @@ function renderItemPekerjaanList(overlay, kg){
       const rows = detailMap[it.id] || [];
       if(it.divisi_nomor !== lastDivisi){
         lastDivisi = it.divisi_nomor;
-        bodyRows.push(`<tr class="bg-navy-50/70"${firstGroup?'':' '}><td colspan="${isEditor()?11:10}" class="py-1.5 px-2 font-display font-bold text-[12.5px] text-navy-800 border-t border-line">${it.divisi_nomor?`DIVISI ${it.divisi_nomor} — ${(it.divisi_nama||'').toUpperCase()}`:'TANPA REFERENSI DIVISI'}</td></tr>`);
+        bodyRows.push(`<tr class="bg-navy-50/70"${firstGroup?'':' '}><td colspan="${isEditor()?13:12}" class="py-1.5 px-2 font-display font-bold text-[12.5px] text-navy-800 border-t border-line">${it.divisi_nomor?`DIVISI ${it.divisi_nomor} — ${(it.divisi_nama||'').toUpperCase()}`:'TANPA REFERENSI DIVISI'}</td></tr>`);
         firstGroup = false;
       }
       no++;
@@ -3996,7 +3971,8 @@ function renderItemPekerjaanList(overlay, kg){
           </div>`:''}</td>
         <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line">${it.satuan}</td>
         <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_add,2)}</td>
-        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_terpasang,2)}</td>`;
+        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_terpasang,2)}</td>
+        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${it.persen_progres!=null?fmtNum(it.persen_progres,2)+'%':'—'}</td>`;
       if(!rows.length){
         bodyRows.push(`<tr>${firstCells}
           <td class="py-1.5 px-2 border-t border-line text-ink-400 text-center" colspan="4">— belum ada rincian STA —</td>
@@ -4039,6 +4015,7 @@ function renderItemPekerjaanList(overlay, kg){
               <th class="py-1.5 px-2 font-semibold">Sat</th>
               <th class="py-1.5 px-2 font-semibold text-right">Vol. ADD</th>
               <th class="py-1.5 px-2 font-semibold text-right">Vol. Terpasang</th>
+              <th class="py-1.5 px-2 font-semibold text-right whitespace-nowrap">Progres %</th>
               <th class="py-1.5 px-2 font-semibold whitespace-nowrap">Segmen / STA</th>
               <th class="py-1.5 px-2 font-semibold" colspan="2"></th>
               <th class="py-1.5 px-2 font-semibold text-right whitespace-nowrap">Panjang (M)</th>
