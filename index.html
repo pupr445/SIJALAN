@@ -3997,35 +3997,28 @@ function renderItemPekerjaanList(overlay, kg){
       }
       no++;
       const hasRows = rows.length > 0;
-      // Kolom label (No/Mata Pembayaran/Sat) dibuat menyatu (rowspan) sampai
-      // ke baris ringkasan "Total Panjang" di bagian bawah, supaya baris
-      // ringkasan tetap sejajar lurus dengan kolom "Panjang (M)".
-      // Catatan: kolom "Uraian Pekerjaan" SENGAJA TIDAK ikut menyatu (rowspan)
-      // lagi seperti sebelumnya — kolom "Segmen" yang tadinya terpisah kini
-      // digabung ke dalam kolom Uraian Pekerjaan (meniru format kertas
-      // Backup Data): baris pertama menampilkan nama pekerjaan, lalu setiap
-      // kali nama segmen berubah pada baris rincian STA berikutnya, nama
-      // segmen itu ditampilkan (mis. "- Segmen I") pada kolom Uraian
-      // Pekerjaan di baris tersebut; baris rincian dengan segmen yang sama
-      // dibiarkan kosong pada kolom ini. Ini menghilangkan satu kolom penuh
-      // dari tabel sehingga muat lebih rapi saat dicetak potret.
-      const labelRowspan = hasRows ? rows.length + 1 : 1;
-      // Kolom Vol. ADD & Vol. Terpasang HANYA menyatu untuk baris rincian STA
-      // (tidak sampai ke baris ringkasan), karena baris ringkasan memakai
-      // posisi kolom ini untuk menampilkan Progres % — sesuai permintaan:
-      // Progres % tampil di ringkasan, sejajar seperti "Total Panjang".
-      const volRowspan = hasRows ? rows.length : 1;
+      // Kolom label (No/Mata Pembayaran/Sat) dibuat menyatu (rowspan) dari
+      // baris judul item sampai ke baris ringkasan "Total Panjang" di
+      // bagian bawah, supaya baris ringkasan tetap sejajar lurus dengan
+      // kolom "Panjang (M)".
+      // Catatan struktur baris (meniru lembar Backup Data kertas):
+      //  1) Baris JUDUL ITEM — nama pekerjaan + Sat + total Vol. ADD/
+      //     Vol. Terpasang, kolom STA/Panjang/Posisi dikosongkan.
+      //  2) Baris RINCIAN STA — satu baris per rentang STA; nama segmen
+      //     (jika berubah dari baris sebelumnya) ditampilkan di kolom
+      //     "Uraian Pekerjaan" PADA BARIS YANG SAMA dengan data STA/
+      //     Panjang/Posisi miliknya (sebelumnya nama segmen ditumpuk di
+      //     baris judul item sehingga tidak sejajar vertikal dengan data
+      //     STA/Volume/Panjang/Posisi — diperbaiki di sini).
+      //  3) Baris RINGKASAN — Progres % & Total Panjang.
+      // "Segmen" bukan kolom tersendiri — digabung ke kolom Uraian
+      // Pekerjaan persis seperti lembar Backup Data kertas.
+      const labelRowspan = hasRows ? rows.length + 2 : 1;
       const totalPanjang = rows.reduce((s,r)=>s+(Number(r.panjang_m)||0), 0);
       const noMataCells = `
         <td rowspan="${labelRowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono">${no}</td>
         <td rowspan="${labelRowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono whitespace-nowrap">${it.kode_mata_pembayaran}</td>`;
       const satCell = `<td rowspan="${labelRowspan}" class="py-1.5 px-2 align-top border-t border-line">${it.satuan}</td>`;
-      const volCells = `
-        <td rowspan="${volRowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_add,2,true)}</td>
-        <td rowspan="${volRowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_terpasang,2,true)}</td>`;
-      // Sel Uraian Pekerjaan untuk baris pertama item: nama pekerjaan + seksi
-      // + tombol aksi, ditambah nama segmen (jika ada) di baris rincian
-      // pertama.
       function uraianTd(extraContent){
         return `<td class="py-1.5 px-2 align-top border-t border-line font-medium min-w-[150px]">${extraContent}</td>`;
       }
@@ -4039,28 +4032,36 @@ function renderItemPekerjaanList(overlay, kg){
           ${noMataCells}
           ${uraianTd(uraianItemHtml)}
           ${satCell}
-          ${volCells}
+          <td class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_add,2,true)}</td>
+          <td class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_terpasang,2,true)}</td>
           <td class="py-1.5 px-2 border-t border-line text-ink-400 text-center" colspan="5">— belum ada rincian STA —</td>
           ${isEditor()?`<td class="py-1.5 px-2 border-t border-line no-print"></td>`:''}
         </tr>`);
       } else {
+        // Baris JUDUL ITEM: nama pekerjaan + total volume, kolom STA/Panjang/
+        // Posisi dikosongkan (bukan bagian dari rincian per-STA).
+        bodyRows.push(`<tr>
+          ${noMataCells}
+          ${uraianTd(uraianItemHtml)}
+          ${satCell}
+          <td class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_add,2,true)}</td>
+          <td class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_terpasang,2,true)}</td>
+          <td class="py-1.5 px-2 border-t border-line"></td>
+          <td class="py-1.5 px-2 border-t border-line"></td>
+          <td class="py-1.5 px-2 border-t border-line"></td>
+          <td class="py-1.5 px-2 border-t border-line"></td>
+          <td class="py-1.5 px-2 border-t border-line"></td>
+          ${isEditor()?`<td class="py-1.5 px-2 border-t border-line no-print"></td>`:''}
+        </tr>`);
         let segmenSebelumnya = null;
         rows.forEach((r,i)=>{
           const segmenBerubah = (r.nama_segmen||'') !== segmenSebelumnya;
           segmenSebelumnya = r.nama_segmen||'';
-          let isiUraian;
-          if(i===0){
-            isiUraian = uraianItemHtml + (r.nama_segmen? `<div class="italic text-ink-500 mt-1">- ${r.nama_segmen}</div>` : '');
-          } else if(segmenBerubah && r.nama_segmen){
-            isiUraian = `<div class="italic text-ink-500">- ${r.nama_segmen}</div>`;
-          } else {
-            isiUraian = '';
-          }
+          const isiUraian = (segmenBerubah && r.nama_segmen) ? `<div class="italic text-ink-500">- ${r.nama_segmen}</div>` : '';
           bodyRows.push(`<tr data-detail-id="${r.id}">
-            ${i===0?noMataCells:''}
             ${uraianTd(isiUraian)}
-            ${i===0?satCell:''}
-            ${i===0?volCells:''}
+            <td class="py-1.5 px-2 border-t border-line"></td>
+            <td class="py-1.5 px-2 border-t border-line"></td>
             <td class="py-1.5 px-2 border-t border-line font-mono whitespace-nowrap">${r.sta_awal}</td>
             <td class="py-1.5 px-2 border-t border-line text-center text-ink-400">s.d.</td>
             <td class="py-1.5 px-2 border-t border-line font-mono whitespace-nowrap">${r.sta_akhir}</td>
@@ -4072,10 +4073,9 @@ function renderItemPekerjaanList(overlay, kg){
             </td>`:''}
           </tr>`);
         });
-        // Baris ringkasan: kolom Uraian Pekerjaan kosong (karena kolom ini
-        // tak lagi menyatu/rowspan), Progres % ditampilkan sejajar di bawah
-        // kolom Vol. Terpasang, dan Total Panjang sejajar lurus di bawah
-        // kolom Panjang (M).
+        // Baris ringkasan: kolom Uraian Pekerjaan & Vol. ADD kosong, Progres %
+        // ditampilkan sejajar di bawah kolom Vol. Terpasang, dan Total Panjang
+        // sejajar lurus di bawah kolom Panjang (M).
         bodyRows.push(`<tr class="bg-ink-50 font-semibold">
           <td class="py-1 px-2 border-t border-line"></td>
           <td class="py-1 px-2 border-t border-line"></td>
