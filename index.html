@@ -4054,32 +4054,31 @@ function renderItemPekerjaanList(overlay, kg){
           ${isEditor()?`<td class="py-1.5 px-2 border-t border-line no-print sticky right-0 z-10 bg-white shadow-[-4px_0_4px_-2px_rgba(0,0,0,0.06)]"></td>`:''}
         </tr>`);
         // Hierarki 2 tingkat (lihat migration 027):
-        //  - induk_segmen  = kelompok besar, dicetak BOLD tiap kali berubah
-        //    (mis. "- Segmen I / Segmen Rekon", "- Segmen II / Segmen
-        //    Berkala"). Baris tanpa induk_segmen memakai nama_segmen-nya
-        //    sendiri sebagai induk (kompatibel dengan data lama).
-        //  - nama_segmen   = sub-label baris itu sendiri (mis. "Jembatan
-        //    Kalalap 2", "Deuker Eksisting"), dicetak ITALIC & sedikit
-        //    menjorok (nested) tiap kali berubah, TAPI TIDAK memicu
-        //    baris induk baru selama induk_segmen-nya masih sama —
-        //    persis seperti pada lembar Backup Data kertas di mana
-        //    Jembatan Kalalap 1/2, Langgar Jalan, dan Deuker Eksisting
-        //    tetap tercatat sebagai bagian dari Segmen I.
+        //  - induk_segmen  = kelompok besar (Segmen), dicetak BOLD dengan
+        //    tanda "- " tiap kali berubah (mis. "- Segmen I / Segmen
+        //    Rekon"). HANYA induk_segmen yang boleh pakai tanda "- ".
+        //  - nama_segmen   = label Item/Sub-bagian (mis. "Jembatan
+        //    Kalalap 2", "Bahu Jalan"), dicetak ITALIC TANPA tanda "- ",
+        //    menjorok bila ada induk_segmen di atasnya. Kalau
+        //    induk_segmen kosong, baris ini TIDAK dipromosikan jadi
+        //    induk — tetap tampil sebagai label sub-bagian polos (tanpa
+        //    dash, tanpa bold, tanpa indentasi).
         let indukSebelumnya = null;
         let subLabelSebelumnya = null;
         rows.forEach((r,i)=>{
-          const indukSekarang = (r.induk_segmen||r.nama_segmen||'').trim();
+          const indukSekarang = (r.induk_segmen||'').trim();
           const indukBerubah = indukSekarang !== indukSebelumnya;
           indukSebelumnya = indukSekarang;
 
           const subLabelSekarang = (r.nama_segmen||'').trim();
-          const isSubBagian = subLabelSekarang && subLabelSekarang !== indukSekarang;
           const subLabelBerubah = subLabelSekarang !== subLabelSebelumnya;
           subLabelSebelumnya = subLabelSekarang;
 
           let isiUraian = '';
-          if(indukBerubah && indukSekarang) isiUraian += `<div class="font-semibold text-ink-600">${indukSekarang}</div>`;
-          if(isSubBagian && (subLabelBerubah || indukBerubah)) isiUraian += `<div class="italic text-ink-500 pl-3">${subLabelSekarang}</div>`;
+          if(indukBerubah && indukSekarang) isiUraian += `<div class="font-semibold text-ink-600">- ${indukSekarang}</div>`;
+          if(subLabelBerubah && subLabelSekarang && subLabelSekarang !== indukSekarang){
+            isiUraian += `<div class="italic text-ink-500${indukSekarang?' pl-3':''}">${subLabelSekarang}</div>`;
+          }
           // STA opsional: kalau STA Awal & STA Akhir sama-sama kosong,
           // tampilkan blank saja (tidak perlu tanda "s.d." atau strip).
           const staAwal = (r.sta_awal||'').trim();
