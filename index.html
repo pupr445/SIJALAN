@@ -4124,25 +4124,26 @@ function renderItemPekerjaanList(overlay, kg){
     });
 
     box.innerHTML = `
-      <div class="overflow-x-auto -mx-1 border border-line rounded-xl">
+      <div class="text-[11px] text-ink-400 mb-1 no-print md:hidden">← Geser tabel untuk melihat kolom STA, Panjang &amp; Posisi →</div>
+      <div class="overflow-x-auto overflow-y-auto max-h-[55vh] -mx-1 border border-line rounded-xl">
         <table class="w-full text-[12px] border-collapse min-w-[860px]">
-          <thead>
+          <thead class="sticky top-0 z-30">
             <tr class="text-ink-500 text-center bg-ink-50">
-              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">No</th>
-              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">Mata<br>Pembayaran</th>
-              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line text-left">Uraian Pekerjaan</th>
-              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">Sat</th>
-              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">Volume<br>ADD</th>
-              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">Volume<br>Terpasang</th>
-              <th colspan="3" class="py-1 px-2 font-semibold text-center border-b border-line">STA</th>
-              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line whitespace-nowrap">Panjang<br>(M)</th>
-              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line">Posisi</th>
-              ${isEditor()?`<th rowspan="2" class="py-1.5 px-2 no-print sticky right-0 z-20 bg-ink-50 shadow-[-4px_0_4px_-2px_rgba(0,0,0,0.06)]">Aksi</th>`:''}
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line bg-ink-50">No</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line bg-ink-50">Mata<br>Pembayaran</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line text-left bg-ink-50">Uraian Pekerjaan</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line bg-ink-50">Sat</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line bg-ink-50">Volume<br>ADD</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line bg-ink-50">Volume<br>Terpasang</th>
+              <th colspan="3" class="py-1 px-2 font-semibold text-center border-b border-line bg-ink-50">STA</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line whitespace-nowrap bg-ink-50">Panjang<br>(M)</th>
+              <th rowspan="2" class="py-1.5 px-2 font-semibold align-bottom border-b border-line bg-ink-50">Posisi</th>
+              ${isEditor()?`<th rowspan="2" class="py-1.5 px-2 no-print sticky right-0 z-40 bg-ink-50 shadow-[-4px_0_4px_-2px_rgba(0,0,0,0.06)]">Aksi</th>`:''}
             </tr>
             <tr class="text-ink-500 text-center bg-ink-50">
-              <th class="py-1 px-2 font-semibold whitespace-nowrap">STA Awal</th>
-              <th class="py-1 px-2 font-semibold"></th>
-              <th class="py-1 px-2 font-semibold whitespace-nowrap">STA Akhir</th>
+              <th class="py-1 px-2 font-semibold whitespace-nowrap bg-ink-50">STA Awal</th>
+              <th class="py-1 px-2 font-semibold bg-ink-50"></th>
+              <th class="py-1 px-2 font-semibold whitespace-nowrap bg-ink-50">STA Akhir</th>
             </tr>
           </thead>
           <tbody>${bodyRows.join('')}</tbody>
