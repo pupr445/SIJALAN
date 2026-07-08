@@ -207,6 +207,20 @@
     @page kegiatan-cetak{ size: landscape; margin: 12mm 10mm; }
     body.modal-printing{ page: kegiatan-cetak; }
     .overflow-x-auto{ overflow:visible !important; }
+
+    /* Perbaikan: sejak wadah tabel "Rincian Mata Pembayaran" dibuat bisa
+       scroll internal (max-height + header sticky) supaya lebih nyaman di
+       layar, saat DICETAK ini malah menyebabkan baris judul "DIVISI ..."
+       tampak bergaris ganda dan teks buram — position:sticky pada thead
+       ikut "membeku" saat browser mem-paginasi tabel ke beberapa halaman,
+       sehingga header lama ikut ter-render tumpang tindih di atas baris
+       judul Divisi berikutnya. Perbaikan: matikan sticky & batas tinggi
+       khusus saat cetak, kembalikan ke aliran dokumen biasa (thead browser
+       akan tetap otomatis terulang tiap halaman tanpa perlu sticky). */
+    #item-pekerjaan-list .overflow-x-auto{ max-height:none !important; }
+    #item-pekerjaan-list thead{ position:static !important; top:auto !important; }
+    #item-pekerjaan-list tr{ break-inside: avoid; page-break-inside: avoid; }
+
     #item-pekerjaan-list table{
       width:100% !important; min-width:0 !important; table-layout:auto;
       font-size:10px !important; border-collapse:collapse !important;
