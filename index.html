@@ -3765,7 +3765,7 @@ function openKegiatanDetailModal(kg){
     <h4 class="font-display font-bold text-[14px] mb-2">Kelengkapan Dokumen</h4>
     <div id="dok-matrix" class="text-[13px]"><div class="skel h-32 w-full"></div></div>
   `);
-  overlay.querySelector('div.card').classList.add('!max-w-2xl');
+  overlay.querySelector('div.card').classList.add('!max-w-4xl');
   overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
   overlay.querySelector('[data-cetak-kegiatan]').addEventListener('click', ()=>cetakModal());
   hydrateFotoThumbs(overlay);
@@ -3825,19 +3825,42 @@ function renderKontrakInfo(overlay, kg){
       box.innerHTML = `<p class="text-ink-400">Belum ada data kontrak. ${isEditor()?'Klik "Ubah" untuk mengisi.':''}</p>`;
       return;
     }
+    // Format daftar bernomor, meniru susunan kop "PAKET PENANGANAN ..." pada
+    // lembar Backup Data kertas (1 Nama Paket, 2 Lokasi, 3 No. Kontrak, dst).
+    const namaPaket = d.nama_paket_keterangan || `${(d.jenis_penanganan||'').replaceAll('_',' ')} Ruas ${d.nama_ruas||''}`.trim();
+    const baris = [
+      ['Nama Paket', namaPaket || '—'],
+      ['Lokasi', d.kabupaten || '—'],
+      ['No. Kontrak', d.no_kontrak || '—'],
+      ['Tanggal', d.tanggal_kontrak ? fmtDate(d.tanggal_kontrak) : '—'],
+      ['No. Add Kontrak', d.no_addendum || '—'],
+      ['Tanggal', d.tanggal_addendum ? fmtDate(d.tanggal_addendum) : '—'],
+      ['Kontraktor', d.nama_kontraktor || '—'],
+      ['Nama Direktur / No Hp', `${d.direktur_kontraktor||'—'}${d.telepon_kontraktor?' / '+d.telepon_kontraktor:''}`],
+      ['Nilai Kontrak', fmtRp(d.nilai_kontrak)],
+      ['Konsultan', d.nama_konsultan || '—'],
+      ['Nama Direktur / No Hp', `${d.direktur_konsultan||'—'}${d.telepon_konsultan?' / '+d.telepon_konsultan:''}`],
+      ['Waktu Pelaksana', `${d.waktu_pelaksana_hk?d.waktu_pelaksana_hk+' HK':'—'}${d.tgl_mulai_pelaksana?` (${fmtDate(d.tgl_mulai_pelaksana)} sd ${fmtDate(d.tgl_akhir_pelaksana)})`:''}`],
+    ];
     box.innerHTML = `
-      <div class="grid grid-cols-2 gap-3">
-        <div><span class="text-ink-400">No. Kontrak</span><div class="font-medium">${d.no_kontrak||'—'}</div></div>
-        <div><span class="text-ink-400">Tanggal Kontrak</span><div class="font-medium">${fmtDate(d.tanggal_kontrak)}</div></div>
-        <div><span class="text-ink-400">No. Addendum</span><div class="font-medium">${d.no_addendum||'—'}</div></div>
-        <div><span class="text-ink-400">Tanggal Addendum</span><div class="font-medium">${d.tanggal_addendum?fmtDate(d.tanggal_addendum):'—'}</div></div>
-        <div><span class="text-ink-400">Nilai Kontrak</span><div class="font-medium">${fmtRp(d.nilai_kontrak)}</div></div>
-        <div><span class="text-ink-400">Waktu Pelaksana</span><div class="font-medium">${d.waktu_pelaksana_hk?d.waktu_pelaksana_hk+' HK':'—'}${d.tgl_mulai_pelaksana?` (${fmtDate(d.tgl_mulai_pelaksana)} – ${fmtDate(d.tgl_akhir_pelaksana)})`:''}</div></div>
-        <div><span class="text-ink-400">Kontraktor</span><div class="font-medium">${d.nama_kontraktor||'—'}</div></div>
-        <div><span class="text-ink-400">Direktur / No HP</span><div class="font-medium">${d.direktur_kontraktor||'—'} ${d.telepon_kontraktor?'/ '+d.telepon_kontraktor:''}</div></div>
-        <div><span class="text-ink-400">Konsultan</span><div class="font-medium">${d.nama_konsultan||'—'}</div></div>
-        <div><span class="text-ink-400">Direktur / No HP</span><div class="font-medium">${d.direktur_konsultan||'—'} ${d.telepon_konsultan?'/ '+d.telepon_konsultan:''}</div></div>
-        <div class="col-span-2"><span class="text-ink-400">Status Update</span><div class="font-medium">${d.status_update?fmtDate(d.status_update):'—'}</div></div>
+      <div class="rounded-xl border border-line overflow-hidden">
+        <table class="w-full text-[12.5px]">
+          <tbody>
+            ${baris.map((b,i)=>`
+              <tr class="${i%2===1?'bg-ink-50':''}">
+                <td class="py-1 px-2.5 w-6 text-ink-400 align-top">${i+1}</td>
+                <td class="py-1 px-2.5 w-[168px] text-ink-500 align-top">${b[0]}</td>
+                <td class="py-1 px-2.5 w-3 text-ink-400 align-top">:</td>
+                <td class="py-1 px-2.5 font-medium align-top">${b[1]}</td>
+              </tr>`).join('')}
+            <tr class="${baris.length%2===1?'bg-ink-50':''}">
+              <td class="py-1 px-2.5 text-ink-400 align-top">${baris.length+1}</td>
+              <td class="py-1 px-2.5 text-ink-500 align-top">Status Update</td>
+              <td class="py-1 px-2.5 text-ink-400 align-top">:</td>
+              <td class="py-1 px-2.5 font-medium align-top">${d.status_update?fmtDate(d.status_update):'—'}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>`;
   }).catch(err=>{ box.innerHTML = errorPanel(err); });
 }
@@ -3926,121 +3949,166 @@ function openKontrakFormModal(penangananId, onSaved){
 }
 
 // --- 11b-2. RINCIAN MATA PEMBAYARAN (item_pekerjaan) & DETAIL VOLUME PER STA ---
+// Ditampilkan sebagai SATU TABEL "Backup Data" (persis format Kartu/Backup
+// Volume kertas: No | Mata Pembayaran | Uraian Pekerjaan | Sat | Volume ADD |
+// Volume Terpasang | STA | Panjang (M) | Posisi), dikelompokkan per Divisi
+// Spek BM 2018 Rev.2, dengan baris rincian per Segmen/STA bersarang di bawah
+// tiap Mata Pembayaran dan baris "Total Panjang" di akhir tiap item — meniru
+// susunan lembar Backup Data lapangan (lihat contoh format kertas).
 function renderItemPekerjaanList(overlay, kg){
   const box = overlay.querySelector('#item-pekerjaan-list');
   if(!box) return;
-  api.itemPekerjaanList(kg.id).then(items=>{
+  box.innerHTML = `<div class="skel h-24 w-full"></div>`;
+  api.itemPekerjaanList(kg.id).then(async items=>{
     if(!items.length){ box.innerHTML = `<p class="text-ink-400">Belum ada item mata pembayaran.</p>`; return; }
-    box.innerHTML = items.map(it=>`
-      <div class="border border-line rounded-xl p-3 mb-2" data-item-id="${it.id}">
-        <div class="flex items-start justify-between gap-2">
-          <div class="min-w-0">
-            <div class="font-mono text-[12px] text-ink-400">${it.kode_mata_pembayaran}${it.divisi_nomor?` · Div ${it.divisi_nomor}${it.nama_seksi?' — '+it.nama_seksi:''}`:''}</div>
-            <div class="font-semibold text-ink-800">${it.uraian_pekerjaan}</div>
-          </div>
-          ${isEditor()?`<div class="flex gap-2 shrink-0 no-print">
-            <button data-edit-item title="Ubah item" class="text-ink-400 hover:text-navy-700">${icon('edit','w-4 h-4')}</button>
-            <button data-hapus-item title="Hapus item" class="text-ink-400 hover:text-[var(--bad)]">${icon('trash','w-4 h-4')}</button>
-          </div>`:''}
-        </div>
-        <div class="grid grid-cols-3 gap-2 mt-2 text-[12.5px]">
-          <div><span class="text-ink-400">Vol. ADD</span><div class="font-medium font-mono">${fmtNum(it.total_volume_add,2)} ${it.satuan}</div></div>
-          <div><span class="text-ink-400">Vol. Terpasang</span><div class="font-medium font-mono">${fmtNum(it.total_volume_terpasang,2)} ${it.satuan}</div></div>
-          <div><span class="text-ink-400">Progres</span><div class="font-medium font-mono">${it.persen_progres!=null?it.persen_progres+'%':'—'}</div></div>
-        </div>
-        <button data-toggle-detail class="no-print text-[12px] text-navy-700 font-semibold underline mt-2">Lihat rincian STA</button>
-        <div data-detail-box class="hidden mt-2"></div>
-      </div>`).join('');
-
-    box.querySelectorAll('[data-item-id]').forEach(card=>{
-      const itemId = card.dataset.itemId;
-      const itemData = items.find(i=>i.id===itemId);
-      card.querySelector('[data-edit-item]')?.addEventListener('click', ()=>{
-        openItemPekerjaanFormModal(kg.id, itemData, ()=>renderItemPekerjaanList(overlay, kg));
-      });
-      card.querySelector('[data-hapus-item]')?.addEventListener('click', async ()=>{
-        if(!confirm('Hapus item pekerjaan ini beserta seluruh rincian STA-nya?')) return;
-        try{ await api.deleteItemPekerjaan(itemId); renderItemPekerjaanList(overlay, kg); notifikasiToast('Item dihapus.','success'); }
-        catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
-      });
-      const detailBox = card.querySelector('[data-detail-box]');
-      let loaded = false;
-      card.querySelector('[data-toggle-detail]').addEventListener('click', async (e)=>{
-        const willShow = detailBox.classList.contains('hidden');
-        detailBox.classList.toggle('hidden');
-        e.target.textContent = willShow ? 'Sembunyikan rincian STA' : 'Lihat rincian STA';
-        if(willShow && !loaded){ loaded = true; renderDetailVolumeTable(detailBox, itemId, kg.id, overlay); }
-      });
+    // Urutkan per Divisi lalu urutan tampil, supaya pengelompokan Divisi rapi
+    // dan konsisten dengan urutan pada Daftar Kuantitas dan Harga (DKH).
+    items = items.slice().sort((a,b)=>{
+      const da = a.divisi_nomor ?? 999, db = b.divisi_nomor ?? 999;
+      if(da!==db) return da-db;
+      if((a.urutan||0)!==(b.urutan||0)) return (a.urutan||0)-(b.urutan||0);
+      return (a.kode_mata_pembayaran||'').localeCompare(b.kode_mata_pembayaran||'');
     });
-  }).catch(err=>{ box.innerHTML = errorPanel(err); });
-}
+    const detailMap = {};
+    await Promise.all(items.map(async it=>{ detailMap[it.id] = await api.detailVolumeList(it.id); }));
 
-function renderDetailVolumeTable(container, itemPekerjaanId, penangananId, overlay){
-  container.innerHTML = `<div class="skel h-16 w-full"></div>`;
-  api.detailVolumeList(itemPekerjaanId).then(rows=>{
-    container.innerHTML = `
-      <div class="overflow-x-auto -mx-1">
-        <table class="w-full text-[12px]">
-          <thead><tr class="text-ink-400 text-left">
-            <th class="py-1 pr-2">Segmen</th><th class="py-1 pr-2">Vol ADD</th><th class="py-1 pr-2">Vol Terpasang</th>
-            <th class="py-1 pr-2">STA Awal</th><th class="py-1 pr-2">STA Akhir</th><th class="py-1 pr-2">Panjang (M)</th>
-            <th class="py-1 pr-2">Posisi</th>${isEditor()?'<th></th>':''}
-          </tr></thead>
-          <tbody>
-            ${rows.map(r=>`
-              <tr class="border-t border-line" data-detail-id="${r.id}">
-                <td class="py-1 pr-2">${r.nama_segmen||'—'}</td>
-                <td class="py-1 pr-2 font-mono">${fmtNum(r.volume_add,2)}</td>
-                <td class="py-1 pr-2 font-mono">${fmtNum(r.volume_terpasang,2)}</td>
-                <td class="py-1 pr-2 font-mono">${r.sta_awal}</td>
-                <td class="py-1 pr-2 font-mono">${r.sta_akhir}</td>
-                <td class="py-1 pr-2 font-mono">${fmtNum(r.panjang_m,2)}</td>
-                <td class="py-1 pr-2">${r.posisi||'—'}</td>
-                ${isEditor()?`<td class="py-1 pr-2 whitespace-nowrap">
-                  <button data-edit-detail class="text-ink-400 hover:text-navy-700">${icon('edit','w-3.5 h-3.5')}</button>
-                  <button data-hapus-detail class="text-ink-400 hover:text-[var(--bad)]">${icon('trash','w-3.5 h-3.5')}</button>
-                </td>`:''}
-              </tr>`).join('')}
-          </tbody>
+    let no = 0;
+    let lastDivisi;
+    let firstGroup = true;
+    const bodyRows = [];
+    items.forEach(it=>{
+      const rows = detailMap[it.id] || [];
+      if(it.divisi_nomor !== lastDivisi){
+        lastDivisi = it.divisi_nomor;
+        bodyRows.push(`<tr class="bg-navy-50/70"${firstGroup?'':' '}><td colspan="${isEditor()?11:10}" class="py-1.5 px-2 font-display font-bold text-[12.5px] text-navy-800 border-t border-line">${it.divisi_nomor?`DIVISI ${it.divisi_nomor} — ${(it.divisi_nama||'').toUpperCase()}`:'TANPA REFERENSI DIVISI'}</td></tr>`);
+        firstGroup = false;
+      }
+      no++;
+      const rowspan = Math.max(rows.length, 1);
+      const totalPanjang = rows.reduce((s,r)=>s+(Number(r.panjang_m)||0), 0);
+      const firstCells = `
+        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono">${no}</td>
+        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono whitespace-nowrap">${it.kode_mata_pembayaran}</td>
+        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-medium min-w-[160px]">${it.uraian_pekerjaan}${it.nama_seksi?`<div class="text-[11px] text-ink-400 font-normal mt-0.5">Seksi ${it.kode_seksi||''} ${it.nama_seksi}</div>`:''}${isEditor()?`<div class="no-print flex gap-2 mt-1.5">
+            <button data-edit-item="${it.id}" class="text-ink-400 hover:text-navy-700" title="Ubah item">${icon('edit','w-3.5 h-3.5')}</button>
+            <button data-hapus-item="${it.id}" class="text-ink-400 hover:text-[var(--bad)]" title="Hapus item">${icon('trash','w-3.5 h-3.5')}</button>
+            <button data-tambah-detail="${it.id}" class="text-navy-700 font-semibold underline text-[11px]" title="Tambah baris STA">+ Baris STA</button>
+          </div>`:''}</td>
+        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line">${it.satuan}</td>
+        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_add,2)}</td>
+        <td rowspan="${rowspan}" class="py-1.5 px-2 align-top border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(it.total_volume_terpasang,2)}</td>`;
+      if(!rows.length){
+        bodyRows.push(`<tr>${firstCells}
+          <td class="py-1.5 px-2 border-t border-line text-ink-400 text-center" colspan="4">— belum ada rincian STA —</td>
+          <td class="py-1.5 px-2 border-t border-line text-ink-400 text-center">—</td>
+          ${isEditor()?`<td class="py-1.5 px-2 border-t border-line no-print"></td>`:''}
+        </tr>`);
+      } else {
+        rows.forEach((r,i)=>{
+          bodyRows.push(`<tr data-detail-id="${r.id}">
+            ${i===0?firstCells:''}
+            <td class="py-1.5 px-2 border-t border-line whitespace-nowrap">${r.nama_segmen||'—'}</td>
+            <td class="py-1.5 px-2 border-t border-line font-mono whitespace-nowrap">${r.sta_awal}</td>
+            <td class="py-1.5 px-2 border-t border-line text-center text-ink-400">s.d.</td>
+            <td class="py-1.5 px-2 border-t border-line font-mono whitespace-nowrap">${r.sta_akhir}</td>
+            <td class="py-1.5 px-2 border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(r.panjang_m,2)}</td>
+            <td class="py-1.5 px-2 border-t border-line text-center whitespace-nowrap">${r.posisi||'—'}</td>
+            ${isEditor()?`<td class="py-1.5 px-2 border-t border-line whitespace-nowrap no-print">
+              <button data-edit-detail="${r.id}" data-item-id="${it.id}" class="text-ink-400 hover:text-navy-700">${icon('edit','w-3.5 h-3.5')}</button>
+              <button data-hapus-detail="${r.id}" data-item-id="${it.id}" class="text-ink-400 hover:text-[var(--bad)]">${icon('trash','w-3.5 h-3.5')}</button>
+            </td>`:''}
+          </tr>`);
+        });
+        bodyRows.push(`<tr class="bg-ink-50 font-semibold">
+          <td class="py-1 px-2 border-t border-line text-right" colspan="4">Total Panjang</td>
+          <td class="py-1 px-2 border-t border-line font-mono text-right whitespace-nowrap">${fmtNum(totalPanjang,2)}</td>
+          <td class="py-1 px-2 border-t border-line"></td>
+          ${isEditor()?`<td class="py-1 px-2 border-t border-line no-print"></td>`:''}
+        </tr>`);
+      }
+    });
+
+    box.innerHTML = `
+      <div class="overflow-x-auto -mx-1 border border-line rounded-xl">
+        <table class="w-full text-[12px] border-collapse min-w-[860px]">
+          <thead>
+            <tr class="text-ink-500 text-left bg-ink-50">
+              <th class="py-1.5 px-2 font-semibold">No</th>
+              <th class="py-1.5 px-2 font-semibold">Mata Pembayaran</th>
+              <th class="py-1.5 px-2 font-semibold">Uraian Pekerjaan</th>
+              <th class="py-1.5 px-2 font-semibold">Sat</th>
+              <th class="py-1.5 px-2 font-semibold text-right">Vol. ADD</th>
+              <th class="py-1.5 px-2 font-semibold text-right">Vol. Terpasang</th>
+              <th class="py-1.5 px-2 font-semibold whitespace-nowrap">Segmen / STA</th>
+              <th class="py-1.5 px-2 font-semibold" colspan="2"></th>
+              <th class="py-1.5 px-2 font-semibold text-right whitespace-nowrap">Panjang (M)</th>
+              <th class="py-1.5 px-2 font-semibold text-center">Posisi</th>
+              ${isEditor()?`<th class="py-1.5 px-2 no-print"></th>`:''}
+            </tr>
+          </thead>
+          <tbody>${bodyRows.join('')}</tbody>
         </table>
-        ${!rows.length?'<p class="text-ink-400 py-1">Belum ada baris rincian.</p>':''}
-      </div>
-      ${isEditor()?`<button data-tambah-detail class="no-print text-[12px] text-navy-700 font-semibold underline mt-1">+ Tambah baris STA</button>`:''}`;
+      </div>`;
 
-    container.querySelector('[data-tambah-detail]')?.addEventListener('click', ()=>{
-      openDetailVolumeFormModal(itemPekerjaanId, null, ()=>{ renderDetailVolumeTable(container, itemPekerjaanId, penangananId, overlay); renderItemPekerjaanList(overlay, {id:penangananId}); });
-    });
-    container.querySelectorAll('[data-detail-id]').forEach(tr=>{
-      const detailId = tr.dataset.detailId;
-      const rowData = rows.find(r=>r.id===detailId);
-      tr.querySelector('[data-edit-detail]')?.addEventListener('click', ()=>{
-        openDetailVolumeFormModal(itemPekerjaanId, rowData, ()=>{ renderDetailVolumeTable(container, itemPekerjaanId, penangananId, overlay); renderItemPekerjaanList(overlay, {id:penangananId}); });
+    if(isEditor()){
+      box.querySelectorAll('[data-edit-item]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const itemData = items.find(i=>i.id===btn.dataset.editItem);
+          openItemPekerjaanFormModal(kg.id, itemData, ()=>renderItemPekerjaanList(overlay, kg));
+        });
       });
-      tr.querySelector('[data-hapus-detail]')?.addEventListener('click', async ()=>{
-        if(!confirm('Hapus baris rincian STA ini?')) return;
-        try{
-          await api.deleteDetailVolume(detailId);
-          renderDetailVolumeTable(container, itemPekerjaanId, penangananId, overlay);
-          renderItemPekerjaanList(overlay, {id:penangananId});
-        }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
+      box.querySelectorAll('[data-hapus-item]').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          if(!confirm('Hapus item pekerjaan ini beserta seluruh rincian STA-nya?')) return;
+          try{ await api.deleteItemPekerjaan(btn.dataset.hapusItem); renderItemPekerjaanList(overlay, kg); notifikasiToast('Item dihapus.','success'); }
+          catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
+        });
       });
-    });
-  }).catch(err=>{ container.innerHTML = errorPanel(err); });
+      box.querySelectorAll('[data-tambah-detail]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          openDetailVolumeFormModal(btn.dataset.tambahDetail, null, ()=>renderItemPekerjaanList(overlay, kg));
+        });
+      });
+      box.querySelectorAll('[data-edit-detail]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const itemId = btn.dataset.itemId;
+          const rowData = (detailMap[itemId]||[]).find(r=>r.id===btn.dataset.editDetail);
+          openDetailVolumeFormModal(itemId, rowData, ()=>renderItemPekerjaanList(overlay, kg));
+        });
+      });
+      box.querySelectorAll('[data-hapus-detail]').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          if(!confirm('Hapus baris rincian STA ini?')) return;
+          try{ await api.deleteDetailVolume(btn.dataset.hapusDetail); renderItemPekerjaanList(overlay, kg); notifikasiToast('Baris dihapus.','success'); }
+          catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
+        });
+      });
+    }
+  }).catch(err=>{ box.innerHTML = errorPanel(err); });
 }
 
 function openItemPekerjaanFormModal(penangananId, editData, onSaved){
   const isEdit = !!editData;
-  api.seksiBm().then(seksiList=>{
+  Promise.all([api.divisiBm(), api.seksiBm()]).then(([divisiList, seksiList])=>{
+    const currentSeksi = editData?.seksi_bm_id ? seksiList.find(s=>s.id===editData.seksi_bm_id) : null;
+    const currentDivisiId = currentSeksi?.divisi_id || '';
     const overlay = openModal(`
       <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
-      <h3 class="font-display font-extrabold text-lg mb-4">${isEdit?'Ubah':'Tambah'} Item Mata Pembayaran</h3>
+      <h3 class="font-display font-extrabold text-lg mb-1">${isEdit?'Ubah':'Tambah'} Item Mata Pembayaran</h3>
+      <p class="text-[12.5px] text-ink-500 mb-4">Relasikan ke Divisi &amp; Seksi Spek Umum Bina Marga 2018 Revisi 2.</p>
       <form id="form-item" class="space-y-3">
-        <div>
-          <label class="text-[12.5px] font-semibold text-ink-600">Seksi Spek BM (opsional)</label>
-          <select id="ip-seksi">
-            <option value="">— Tanpa referensi seksi —</option>
-            ${seksiList.map(s=>`<option value="${s.id}" ${editData?.seksi_bm_id===s.id?'selected':''}>Div ${s.divisi_bm?.nomor} — ${s.kode_seksi} ${s.nama_seksi}</option>`).join('')}
-          </select>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="text-[12.5px] font-semibold text-ink-600">Divisi (Spek BM 2018 Rev.2)</label>
+            <select id="ip-divisi">
+              <option value="">— Tanpa referensi divisi —</option>
+              ${divisiList.map(d=>`<option value="${d.id}" ${currentDivisiId===d.id?'selected':''}>Divisi ${d.nomor} — ${d.nama}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="text-[12.5px] font-semibold text-ink-600">Seksi</label>
+            <select id="ip-seksi"><option value="">${currentDivisiId?'— Tanpa referensi seksi —':'— Pilih Divisi dahulu —'}</option></select>
+          </div>
         </div>
         <div><label class="text-[12.5px] font-semibold text-ink-600">Kode Mata Pembayaran *</label><input id="ip-kode" required placeholder="contoh: 3.1.(9)" value="${editData?.kode_mata_pembayaran||''}"></div>
         <div><label class="text-[12.5px] font-semibold text-ink-600">Uraian Pekerjaan *</label><input id="ip-uraian" required value="${editData?.uraian_pekerjaan||''}"></div>
@@ -4052,6 +4120,18 @@ function openItemPekerjaanFormModal(penangananId, editData, onSaved){
         <button type="submit" class="btn-primary w-full">Simpan</button>
       </form>`);
     overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+
+    const divisiSelect = overlay.querySelector('#ip-divisi');
+    const seksiSelect = overlay.querySelector('#ip-seksi');
+    function populateSeksi(divisiId, preselectId){
+      if(!divisiId){ seksiSelect.innerHTML = `<option value="">— Pilih Divisi dahulu —</option>`; return; }
+      const opsi = seksiList.filter(s=>s.divisi_id===divisiId);
+      seksiSelect.innerHTML = `<option value="">— Tanpa referensi seksi —</option>` +
+        opsi.map(s=>`<option value="${s.id}" ${preselectId===s.id?'selected':''}>${s.kode_seksi} — ${s.nama_seksi}</option>`).join('');
+    }
+    populateSeksi(currentDivisiId, editData?.seksi_bm_id || null);
+    divisiSelect.addEventListener('change', ()=>populateSeksi(divisiSelect.value, null));
+
     overlay.querySelector('#form-item').addEventListener('submit', async (e)=>{
       e.preventDefault();
       const errBox = overlay.querySelector('#ip-err');
@@ -4059,7 +4139,7 @@ function openItemPekerjaanFormModal(penangananId, editData, onSaved){
       submitBtn.disabled = true;
       const payload = {
         penanganan_id: penangananId,
-        seksi_bm_id: overlay.querySelector('#ip-seksi').value || null,
+        seksi_bm_id: seksiSelect.value || null,
         kode_mata_pembayaran: overlay.querySelector('#ip-kode').value.trim(),
         uraian_pekerjaan: overlay.querySelector('#ip-uraian').value.trim(),
         satuan: overlay.querySelector('#ip-satuan').value.trim(),
@@ -4076,7 +4156,7 @@ function openItemPekerjaanFormModal(penangananId, editData, onSaved){
         errBox.textContent = terjemahkanErrorDb(err); errBox.classList.remove('hidden');
       }
     });
-  }).catch(err=>alert('Gagal memuat master seksi: '+terjemahkanErrorDb(err)));
+  }).catch(err=>alert('Gagal memuat master Divisi/Seksi: '+terjemahkanErrorDb(err)));
 }
 
 function openDetailVolumeFormModal(itemPekerjaanId, editData, onSaved){
