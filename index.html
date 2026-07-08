@@ -261,6 +261,19 @@
       white-space:normal !important; word-break:normal !important; overflow-wrap:break-word;
       line-height:1.25; min-width:0 !important;
     }
+    /* Perbaikan LANJUTAN #3 (akar masalah sebenarnya): sel kolom No/Mata
+       Pembayaran/Sat memakai rowspan menutupi beberapa baris (judul item →
+       rincian STA → ringkasan) sebagai SATU kotak utuh. Garis bawahnya
+       seharusnya hanya tampil SEKALI di paling bawah kotak itu (sejajar
+       dengan baris ringkasan Progres/Total Panjang). Tapi karena aturan di
+       atas berlaku ke SEMUA <td> termasuk sel rowspan ini, Chrome ikut
+       menggambar garis bawahnya di batas baris bagian dalam (persis di
+       bawah baris judul item, sebelum baris rincian STA pertama) —
+       berdempetan dengan garis bawah baris judul itu sendiri sehingga
+       tampak dobel. Perbaikan: matikan border-bottom KHUSUS pada sel
+       ber-rowspan; garis penutup baris tetap ada karena sel-sel lain (yang
+       tidak rowspan) di baris yang sama tetap menggambar garisnya. */
+    #item-pekerjaan-list td[rowspan]{ border-bottom:none !important; }
     #item-pekerjaan-list th{
       text-transform:none !important; letter-spacing:0 !important; font-size:10px !important;
       text-align:center !important;
