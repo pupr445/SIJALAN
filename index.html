@@ -1543,10 +1543,12 @@ const api = {
   // --- konsultan ---
   async konsultanList(){ const {data,error} = await sb.from('konsultan').select('*').order('nama'); if(error) throw error; return data; },
   async insertKonsultan(payload){ const {data,error} = await sb.from('konsultan').insert(payload).select().single(); if(error) throw error; return data; },
+  async updateKonsultan(id,payload){ const {data,error} = await sb.from('konsultan').update(payload).eq('id',id).select().single(); if(error) throw error; return data; },
 
   // --- kontraktor ---
   async kontraktorList(){ const {data,error} = await sb.from('kontraktor').select('*').order('nama'); if(error) throw error; return data; },
   async insertKontraktor(payload){ const {data,error} = await sb.from('kontraktor').insert(payload).select().single(); if(error) throw error; return data; },
+  async updateKontraktor(id,payload){ const {data,error} = await sb.from('kontraktor').update(payload).eq('id',id).select().single(); if(error) throw error; return data; },
 
   // --- kontrak (No. Kontrak, Addendum, Nilai, Waktu Pelaksana, Konsultan) ---
   async kontrakByPenanganan(penangananId){ const {data,error} = await sb.from('kontrak').select('*').eq('penanganan_id',penangananId).maybeSingle(); if(error) throw error; return data; },
@@ -3943,10 +3945,11 @@ function openKontrakFormModal(penangananId, onSaved){
             ${kontraktorList.map(k=>`<option value="${k.id}" ${penanganan?.kontraktor_id===k.id?'selected':''}>${k.nama}</option>`).join('')}
             <option value="__new__">+ Tambah kontraktor baru…</option>
           </select>
-          <div id="kn-kontraktor-new" class="hidden grid grid-cols-2 gap-2 mt-2">
+          <div id="kn-kontraktor-detail" class="hidden grid grid-cols-2 gap-2 mt-2">
             <input id="kn-kontraktor-nama" placeholder="Nama kontraktor" class="col-span-2">
             <input id="kn-kontraktor-direktur" placeholder="Nama direktur">
             <input id="kn-kontraktor-telp" placeholder="No. HP direktur">
+            <div id="kn-kontraktor-hint" class="hidden col-span-2 text-[11.5px] text-ink-400">Data direktur/No. HP kontraktor ini sudah tersimpan sebelumnya. Ubah di sini jika perlu diperbarui.</div>
           </div>
         </div>
         <div>
@@ -3956,10 +3959,11 @@ function openKontrakFormModal(penangananId, onSaved){
             ${konsultanList.map(k=>`<option value="${k.id}" ${kontrak?.konsultan_id===k.id?'selected':''}>${k.nama}</option>`).join('')}
             <option value="__new__">+ Tambah konsultan baru…</option>
           </select>
-          <div id="kn-konsultan-new" class="hidden grid grid-cols-2 gap-2 mt-2">
+          <div id="kn-konsultan-detail" class="hidden grid grid-cols-2 gap-2 mt-2">
             <input id="kn-konsultan-nama" placeholder="Nama konsultan" class="col-span-2">
             <input id="kn-konsultan-direktur" placeholder="Nama direktur">
             <input id="kn-konsultan-telp" placeholder="No. HP direktur">
+            <div id="kn-konsultan-hint" class="hidden col-span-2 text-[11.5px] text-ink-400">Data direktur/No. HP konsultan ini sudah tersimpan sebelumnya. Ubah di sini jika perlu diperbarui.</div>
           </div>
         </div>
         <div><label class="text-[12.5px] font-semibold text-ink-600">Status Update (tanggal laporan)</label><input id="kn-status-update" type="date" value="${kontrak?.status_update||''}"></div>
@@ -3967,12 +3971,59 @@ function openKontrakFormModal(penangananId, onSaved){
         <button type="submit" class="btn-primary w-full">Simpan</button>
       </form>`);
     overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
-    overlay.querySelector('#kn-kontraktor').addEventListener('change', (e)=>{
-      overlay.querySelector('#kn-kontraktor-new').classList.toggle('hidden', e.target.value!=='__new__');
-    });
-    overlay.querySelector('#kn-konsultan').addEventListener('change', (e)=>{
-      overlay.querySelector('#kn-konsultan-new').classList.toggle('hidden', e.target.value!=='__new__');
-    });
+
+    // Menampilkan & mengisi otomatis field Nama/Direktur/No. HP, baik untuk
+    // entri baru ("__new__") maupun entri yang sudah ada (agar datanya bisa
+    // dilihat dan diperbarui, bukan cuma bisa diisi saat membuat baru).
+    function syncMasterDetail({selectEl, detailEl, hintEl, namaEl, direkturEl, telpEl, list, direkturField}){
+      const val = selectEl.value;
+      if(!val){
+        detailEl.classList.add('hidden');
+        namaEl.value = ''; direkturEl.value = ''; telpEl.value = '';
+        return;
+      }
+      detailEl.classList.remove('hidden');
+      if(val === '__new__'){
+        hintEl.classList.add('hidden');
+        namaEl.value = ''; direkturEl.value = ''; telpEl.value = '';
+        namaEl.readOnly = false;
+        namaEl.focus();
+      }else{
+        const item = list.find(x=>x.id===val);
+        hintEl.classList.remove('hidden');
+        namaEl.value = item?.nama || '';
+        direkturEl.value = item?.[direkturField] || '';
+        telpEl.value = item?.telepon || '';
+        namaEl.readOnly = false; // tetap boleh dikoreksi (mis. salah ketik nama)
+      }
+    }
+
+    const kontraktorEls = {
+      selectEl: overlay.querySelector('#kn-kontraktor'),
+      detailEl: overlay.querySelector('#kn-kontraktor-detail'),
+      hintEl: overlay.querySelector('#kn-kontraktor-hint'),
+      namaEl: overlay.querySelector('#kn-kontraktor-nama'),
+      direkturEl: overlay.querySelector('#kn-kontraktor-direktur'),
+      telpEl: overlay.querySelector('#kn-kontraktor-telp'),
+      list: kontraktorList,
+      direkturField: 'kontak_pic',
+    };
+    const konsultanEls = {
+      selectEl: overlay.querySelector('#kn-konsultan'),
+      detailEl: overlay.querySelector('#kn-konsultan-detail'),
+      hintEl: overlay.querySelector('#kn-konsultan-hint'),
+      namaEl: overlay.querySelector('#kn-konsultan-nama'),
+      direkturEl: overlay.querySelector('#kn-konsultan-direktur'),
+      telpEl: overlay.querySelector('#kn-konsultan-telp'),
+      list: konsultanList,
+      direkturField: 'direktur',
+    };
+
+    kontraktorEls.selectEl.addEventListener('change', ()=>syncMasterDetail(kontraktorEls));
+    konsultanEls.selectEl.addEventListener('change', ()=>syncMasterDetail(konsultanEls));
+    // Isi awal saat modal dibuka (mis. saat mode edit, kontraktor sudah terpilih)
+    syncMasterDetail(kontraktorEls);
+    syncMasterDetail(konsultanEls);
     overlay.querySelector('#form-kontrak').addEventListener('submit', async (e)=>{
       e.preventDefault();
       const errBox = overlay.querySelector('#kn-err');
@@ -3989,6 +4040,15 @@ function openKontrakFormModal(penangananId, onSaved){
             telepon: overlay.querySelector('#kn-kontraktor-telp').value || null,
           });
           kontraktorId = created.id;
+        }else if(kontraktorId){
+          // Kontraktor yang sudah ada: simpan juga jika nama/direktur/HP-nya diubah.
+          const nama = overlay.querySelector('#kn-kontraktor-nama').value.trim();
+          if(!nama) throw new Error('Nama kontraktor wajib diisi.');
+          await api.updateKontraktor(kontraktorId, {
+            nama,
+            kontak_pic: overlay.querySelector('#kn-kontraktor-direktur').value || null,
+            telepon: overlay.querySelector('#kn-kontraktor-telp').value || null,
+          });
         }
         let konsultanId = overlay.querySelector('#kn-konsultan').value || null;
         if(konsultanId === '__new__'){
@@ -4000,6 +4060,15 @@ function openKontrakFormModal(penangananId, onSaved){
             telepon: overlay.querySelector('#kn-konsultan-telp').value || null,
           });
           konsultanId = created.id;
+        }else if(konsultanId){
+          // Konsultan yang sudah ada: simpan juga jika nama/direktur/HP-nya diubah.
+          const nama = overlay.querySelector('#kn-konsultan-nama').value.trim();
+          if(!nama) throw new Error('Nama konsultan wajib diisi.');
+          await api.updateKonsultan(konsultanId, {
+            nama,
+            direktur: overlay.querySelector('#kn-konsultan-direktur').value || null,
+            telepon: overlay.querySelector('#kn-konsultan-telp').value || null,
+          });
         }
         const payload = {
           no_kontrak: overlay.querySelector('#kn-no').value || null,
