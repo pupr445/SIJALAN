@@ -1437,6 +1437,9 @@ const api = {
 
   // --- segmen ---
   async segmenByRuas(ruasId){ const {data,error} = await sb.from('segmen_jalan').select('*').eq('ruas_id',ruasId).order('sta_awal'); if(error) throw error; return data; },
+  async insertSegmen(payload){ const {error} = await sb.from('segmen_jalan').insert(payload); if(error) throw error; },
+  async updateSegmen(id, payload){ const {error} = await sb.from('segmen_jalan').update(payload).eq('id',id); if(error) throw error; },
+  async deleteSegmen(id){ const {error} = await sb.from('segmen_jalan').delete().eq('id',id); if(error) throw error; },
 
   // --- kondisi / survei ---
   async kondisiTerkini(){ const {data,error} = await sb.from('v_kondisi_terkini').select('*'); if(error) throw error; return data; },
@@ -3184,10 +3187,13 @@ async function viewRuasDetail(id){
     <div class="grid lg:grid-cols-3 gap-5">
       <div class="lg:col-span-2 space-y-5">
         <div class="card p-5">
-          <h3 class="font-display font-bold text-[15px] mb-3">Segmen Jalan (${segmen.length})</h3>
-          ${segmen.length? `<table><thead><tr><th>Segmen</th><th>STA</th><th>Perkerasan</th><th>Lajur</th></tr></thead><tbody>
-            ${segmen.map(s=>`<tr><td class="font-mono">${s.kode_segmen||'—'}</td><td class="font-mono">${fmtNum(s.sta_awal,3)} – ${fmtNum(s.sta_akhir,3)}</td><td class="capitalize">${s.jenis_perkerasan||'—'}</td><td>${s.jumlah_lajur||'—'}</td></tr>`).join('')}
-          </tbody></table>` : `<p class="text-ink-400 text-[13px]">Belum ada data segmen untuk ruas ini.</p>`}
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-display font-bold text-[15px]">Segmen Jalan (${segmen.length})</h3>
+            ${isEditor()?`<button id="btn-add-segmen" class="btn-ghost !py-1.5 !px-3 text-[12.5px] no-print">+ Tambah Segmen</button>`:''}
+          </div>
+          ${segmen.length? `<table><thead><tr><th>Segmen</th><th>STA</th><th>Perkerasan</th><th>Lajur</th>${isEditor()?'<th class="no-print">Aksi</th>':''}</tr></thead><tbody id="segmen-tbody">
+            ${segmen.map(s=>`<tr data-id="${s.id}"><td class="font-mono">${s.kode_segmen||'—'}</td><td class="font-mono">${fmtNum(s.sta_awal,3)} – ${fmtNum(s.sta_akhir,3)}</td><td class="capitalize">${s.jenis_perkerasan||'—'}</td><td>${s.jumlah_lajur||'—'}</td>${isEditor()?`<td class="no-print">${actionBtns({onEdit:true, onDelete:isAdmin()})}</td>`:''}</tr>`).join('')}
+          </tbody></table>` : `<p class="text-ink-400 text-[13px]">Belum ada data segmen untuk ruas ini.${isEditor()?' Klik "+ Tambah Segmen" di atas untuk mulai membagi ruas ini per STA.':''}</p>`}
         </div>
         <div class="card p-5">
           <div class="flex items-center justify-between mb-3">
@@ -3292,6 +3298,7 @@ async function viewRuasDetail(id){
     hydrateFotoThumbs(document.getElementById('kegiatan-list'));
     hydrateFotoThumbs(document.getElementById('survei-list'));
     if(isEditor()){
+      document.getElementById('btn-add-segmen')?.addEventListener('click', ()=>openSegmenFormModal(ruas, null, ()=>viewRuasDetail(id)));
       document.getElementById('btn-add-survei')?.addEventListener('click', ()=>openSurveiFormModal(ruas, segmen, null, ()=>viewRuasDetail(id)));
       document.getElementById('btn-add-kegiatan')?.addEventListener('click', ()=>openKegiatanFormModal(ruasAll, ruas, null, ()=>viewRuasDetail(id)));
       document.getElementById('btn-add-anggaran')?.addEventListener('click', ()=>openAnggaranFormModal(ruas, null, ()=>viewRuasDetail(id)));
@@ -3299,6 +3306,15 @@ async function viewRuasDetail(id){
       document.getElementById('btn-add-lalin-ruas')?.addEventListener('click', ()=>openLalulintasRuasFormModal(ruas, segmen, null, ()=>viewRuasDetail(id)));
       document.getElementById('btn-add-lalin-ruas-2')?.addEventListener('click', ()=>openLalulintasRuasFormModal(ruas, segmen, null, ()=>viewRuasDetail(id)));
     }
+    // Segmen jalan actions
+    document.querySelectorAll('#segmen-tbody tr[data-id]').forEach(row=>{
+      const s = segmen.find(x=>x.id===row.dataset.id);
+      row.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>openSegmenFormModal(ruas, s, ()=>viewRuasDetail(id)));
+      row.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
+        if(!(await confirmDelete(`Hapus segmen "${s.kode_segmen||'ini'}" beserta seluruh data survei/lalu lintas yang terkait dengannya?`))) return;
+        try{ await api.deleteSegmen(s.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
+      });
+    });
     // Kegiatan penanganan actions
     document.querySelectorAll('#kegiatan-list [data-kid]').forEach(row=>{
       const kg = kegiatan.find(k=>k.id===row.dataset.kid);
@@ -3452,6 +3468,62 @@ function openRuasFormModal(kabupaten, editData=null, lockedKabupatenId=null){
     }catch(err){ errBox.textContent = terjemahkanErrorDb(err); errBox.classList.remove('hidden'); }
   });
 }
+// Form tambah/ubah Segmen Jalan. Segmen membagi satu ruas jadi beberapa
+// rentang STA dengan karakteristik teknis sendiri (perkerasan, lebar,
+// jumlah lajur) -- jadi dasar untuk survei kondisi & data lalu lintas.
+function openSegmenFormModal(ruas, editData=null, onSaved=null){
+  const isEdit = !!editData;
+  const overlay = openModal(`
+    <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
+    <h3 class="font-display font-extrabold text-lg mb-1">${isEdit?'Ubah Segmen Jalan':'Tambah Segmen Jalan'}</h3>
+    <p class="text-[13px] text-ink-500 mb-4">${ruas.kode_ruas} · ${ruas.nama_ruas}</p>
+    <form id="form-segmen" class="space-y-3">
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Kode Segmen</label><input id="sg-kode" placeholder="mis. SEG-1" value="${editData?.kode_segmen||''}"></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">STA Awal (km) *</label><input id="sg-sta-awal" type="number" step="0.001" min="0" required value="${editData?.sta_awal??''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">STA Akhir (km) *</label><input id="sg-sta-akhir" type="number" step="0.001" min="0" required value="${editData?.sta_akhir??''}"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Jenis Perkerasan</label><select id="sg-perkerasan">
+          <option value="">—</option>
+          ${['aspal','beton','kerikil','tanah','lainnya'].map(p=>`<option value="${p}" ${editData?.jenis_perkerasan===p?'selected':''}>${p[0].toUpperCase()+p.slice(1)}</option>`).join('')}
+        </select></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Jumlah Lajur</label><input id="sg-lajur" type="number" min="1" step="1" value="${editData?.jumlah_lajur??''}"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Lebar Perkerasan (m)</label><input id="sg-lebar-perkerasan" type="number" step="0.01" min="0" value="${editData?.lebar_perkerasan_m??''}"></div>
+        <div><label class="text-[12.5px] font-semibold text-ink-600">Lebar Bahu (m)</label><input id="sg-lebar-bahu" type="number" step="0.01" min="0" value="${editData?.lebar_bahu_m??''}"></div>
+      </div>
+      <div id="sg-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
+      <button type="submit" class="btn-primary w-full">${isEdit?'Simpan Perubahan':'Simpan Segmen'}</button>
+    </form>`);
+  overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
+  overlay.querySelector('#form-segmen').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const errBox = overlay.querySelector('#sg-err');
+    errBox.classList.add('hidden');
+    const staAwal = Number(overlay.querySelector('#sg-sta-awal').value);
+    const staAkhir = Number(overlay.querySelector('#sg-sta-akhir').value);
+    if(!(staAkhir > staAwal)){ errBox.textContent = 'STA Akhir harus lebih besar dari STA Awal.'; errBox.classList.remove('hidden'); return; }
+    const payload = {
+      ruas_id: ruas.id,
+      kode_segmen: overlay.querySelector('#sg-kode').value || null,
+      sta_awal: staAwal,
+      sta_akhir: staAkhir,
+      jenis_perkerasan: overlay.querySelector('#sg-perkerasan').value || null,
+      jumlah_lajur: overlay.querySelector('#sg-lajur').value || null,
+      lebar_perkerasan_m: overlay.querySelector('#sg-lebar-perkerasan').value || null,
+      lebar_bahu_m: overlay.querySelector('#sg-lebar-bahu').value || null,
+    };
+    try{
+      if(isEdit){ await api.updateSegmen(editData.id, payload); } else { await api.insertSegmen(payload); }
+      overlay.remove();
+      notifikasiToast('Segmen berhasil disimpan.', 'success');
+      if(onSaved) onSaved();
+    }catch(err){ errBox.textContent = terjemahkanErrorDb(err); errBox.classList.remove('hidden'); }
+  });
+}
+
 function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
   const isEdit = !!editData;
   const currentSegId = editData?.segmen_id || editData?.segmen_jalan?.id;
@@ -3496,6 +3568,7 @@ function openSurveiFormModal(ruas, segmenList, editData=null, onSaved=null){
         ${progresUploadHtml('sv-progress')}
       </div>
       <div id="sv-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
+      ${segmenList.length? '' : `<p class="text-[12.5px] text-ink-500">Ruas ini belum punya data segmen. Tutup form ini, klik "+ Tambah Segmen" di halaman detail ruas, lalu coba lagi.</p>`}
       <button type="submit" class="btn-primary w-full" ${segmenList.length?'':'disabled'}>${isEdit?'Simpan Perubahan':'Simpan Survei'}</button>
     </form>`);
 
@@ -5885,6 +5958,7 @@ function openLalulintasRuasFormModal(ruas, segmenList, editData=null, onSaved=nu
       </div>
       <div><label class="text-[12.5px] font-semibold text-ink-600">Sumber Data</label><input id="llr-sumber" value="${editData?.sumber_data||''}" placeholder="mis. Survei manual, alat penghitung otomatis…"></div>
       <div id="llr-err" class="hidden text-[13px] text-white bg-[var(--bad)] rounded-lg px-3 py-2"></div>
+      ${(segmenList||[]).length? '' : `<p class="text-[12.5px] text-ink-500">Ruas ini belum punya data segmen. Tutup form ini, klik "+ Tambah Segmen" di halaman detail ruas, lalu coba lagi.</p>`}
       <button type="submit" class="btn-primary w-full" ${(segmenList||[]).length?'':'disabled'}>${isEdit?'Simpan Perubahan':'Simpan Data Lalu Lintas'}</button>
     </form>`);
   overlay.querySelector('[data-close]').addEventListener('click', ()=>overlay.remove());
@@ -5901,7 +5975,7 @@ function openLalulintasRuasFormModal(ruas, segmenList, editData=null, onSaved=nu
       sepeda_motor: overlay.querySelector('#llr-motor').value || null,
       sumber_data: overlay.querySelector('#llr-sumber').value || null,
     };
-    if(!payload.segmen_id){ errBox.textContent='Ruas ini belum punya data segmen. Tambahkan segmen terlebih dahulu di menu Peta Jaringan sebelum mengisi data lalu lintas.'; errBox.classList.remove('hidden'); return; }
+    if(!payload.segmen_id){ errBox.textContent='Ruas ini belum punya data segmen. Tutup form ini, klik "+ Tambah Segmen" di halaman detail ruas, lalu coba lagi.'; errBox.classList.remove('hidden'); return; }
     try{
       if(isEdit){ await api.updateLalulintas(editData.id, payload); } else { await api.insertLalulintas(payload); }
       overlay.remove();
