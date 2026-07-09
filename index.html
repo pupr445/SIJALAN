@@ -519,7 +519,7 @@ const KONDISI_ORDER = ['rusak_berat','rusak_ringan','sedang','baik'];
 const KONDISI_COLOR = {baik:'#2E8B57', sedang:'#E8A33D', rusak_ringan:'#E0672B', rusak_berat:'#C43D3D'};
 const PENUGASAN_STATUS_LABEL = {belum_disurvei:'Belum Disurvei', sedang_disurvei:'Sedang Disurvei', selesai:'Selesai'};
 const PENUGASAN_STATUS_COLOR = {belum_disurvei:'#8896AC', sedang_disurvei:'#E8A33D', selesai:'#2E8B57'};
-const ROLE_LABEL = {admin:'Administrator', kepala_bidang:'Kepala Bidang', petugas_lapangan:'Petugas Lapangan', viewer:'Peninjau'};
+const ROLE_LABEL = {admin:'Administrator', kepala_bidang:'Kepala Bidang', kepala_seksi:'Kepala Seksi', petugas_lapangan:'Petugas Lapangan', viewer:'Peninjau'};
 
 // --- Pengembangan Tingkat 1 · Item #2: definisi kolom untuk pemilih kolom tabel ---
 const RUAS_KOLOM = [
@@ -651,9 +651,9 @@ function formatBarisUntukExcel(rows){
   });
 }
 
-function isEditor(){ return state.profile && ['admin','kepala_bidang','petugas_lapangan'].includes(state.profile.role); }
+function isEditor(){ return state.profile && ['admin','kepala_bidang','kepala_seksi','petugas_lapangan'].includes(state.profile.role); }
 function isAdmin(){ return state.profile && state.profile.role === 'admin'; }
-function isPenugas(){ return state.profile && ['admin','kepala_bidang'].includes(state.profile.role); }
+function isPenugas(){ return state.profile && ['admin','kepala_bidang','kepala_seksi'].includes(state.profile.role); }
 function fmtNum(n, d=0, force=false){ if(n===null||n===undefined) return '—'; return Number(n).toLocaleString('id-ID',{minimumFractionDigits:force?d:0, maximumFractionDigits:d}); }
 function fmtRp(n){ if(n===null||n===undefined) return '—'; return 'Rp ' + Number(n).toLocaleString('id-ID',{maximumFractionDigits:0}); }
 function fmtDate(d){ if(!d) return '—'; return new Date(d).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}); }
