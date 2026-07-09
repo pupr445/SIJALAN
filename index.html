@@ -339,7 +339,7 @@ function tampilkanBannerUpdatePwa(reg){
 // --- 2. STATE GLOBAL ------------------------------------------------------
 const state = {
   user: null, profile: null, route: 'dashboard',
-  kabupatenList: [], kabupatenById: {}, ruasCache: [], selectedRuasId: null,
+  kabupatenList: [], kabupatenById: {}, ruasCache: [], selectedRuasId: null, selectedKabupatenId: null,
   charts: {}, map: null, mapLayer: null,
   sidebarCollapsed: localStorage.getItem('sijalan_sidebar_collapsed')==='1', mobileNavOpen: false,
   theme: localStorage.getItem('sijalan_theme') || 'terang',
@@ -2948,26 +2948,85 @@ function emptyStateMap(){
   </div>`;
 }
 
-// --- 10. VIEW: RUAS JALAN ------------------------------------------------
+// --- 10. VIEW: RUAS JALAN (per Kabupaten/Kota) ---------------------------
+// Struktur baru: level 1 = daftar Kabupaten/Kota (kartu). Klik satu
+// kabupaten -> level 2 = daftar ruas milik kabupaten itu, dan tombol
+// "+ Tambah Ruas" pada level 2 otomatis terkunci ke kabupaten tsb.
 async function viewRuas(){
-  const v = document.getElementById('view');
   if(state.selectedRuasId){ return viewRuasDetail(state.selectedRuasId); }
+  if(state.selectedKabupatenId){ return viewRuasDalamKabupaten(state.selectedKabupatenId); }
+  return viewRuasKabupatenIndex();
+}
+
+// Level 1: daftar kabupaten/kota sebagai pintu masuk ke master ruas.
+async function viewRuasKabupatenIndex(){
+  const v = document.getElementById('view');
+  v.innerHTML = `<div class="skel h-10 w-full mb-4"></div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">${Array(6).fill('<div class="skel h-24 w-full rounded-xl"></div>').join('')}</div>`;
+  try{
+    const [ruas, kabupaten] = await Promise.all([api.ruasList(), api.kabupaten()]);
+    state.ruasCache = ruas; state.kabupatenList = kabupaten;
+    const countByKab = {}, panjangByKab = {};
+    ruas.forEach(r=>{
+      countByKab[r.kabupaten_id] = (countByKab[r.kabupaten_id]||0) + 1;
+      panjangByKab[r.kabupaten_id] = (panjangByKab[r.kabupaten_id]||0) + (Number(r.panjang_km)||0);
+    });
+
+    v.innerHTML = `
+    <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+      <div><h1 class="font-display font-extrabold text-2xl text-ink-900">Master Ruas Jalan</h1>
+      <p class="text-ink-500 text-[13.5px]">${ruas.length} ruas terdaftar di ${kabupaten.length} kabupaten/kota — pilih kabupaten/kota untuk melihat &amp; menambah ruas</p></div>
+    </div>
+    <div class="flex flex-wrap gap-3 mb-4">
+      <input id="kab-search" placeholder="Cari kabupaten/kota…" class="max-w-xs">
+    </div>
+    <div id="kab-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5"></div>
+    <div id="kab-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Kabupaten/kota tidak ditemukan.</div>`;
+
+    function renderGrid(){
+      const q = document.getElementById('kab-search').value.toLowerCase();
+      const list = kabupaten.filter(k=>!q || k.nama.toLowerCase().includes(q));
+      document.getElementById('kab-empty').classList.toggle('hidden', list.length>0);
+      document.getElementById('kab-grid').innerHTML = list.map(k=>`
+        <button type="button" data-id="${k.id}" class="card p-4 text-left hover:shadow-md hover:border-accent/40 transition-shadow">
+          <div class="flex items-start justify-between gap-2">
+            <span class="w-9 h-9 shrink-0 rounded-lg bg-[#EEF3FB] text-navy-700 flex items-center justify-center">${icon('map','w-4.5 h-4.5')}</span>
+            <span class="text-ink-300">${icon('expand','w-4 h-4')}</span>
+          </div>
+          <div class="font-display font-bold text-[15px] text-ink-900 mt-2.5">${k.nama}</div>
+          <div class="text-[12.5px] text-ink-500 mt-1">${fmtNum(countByKab[k.id]||0)} ruas · ${fmtNum(panjangByKab[k.id]||0,1)} km</div>
+        </button>`).join('');
+      document.getElementById('kab-grid').querySelectorAll('[data-id]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{ state.selectedKabupatenId = btn.dataset.id; renderShell(); });
+      });
+    }
+    document.getElementById('kab-search').addEventListener('input', debounce(renderGrid, 200));
+    renderGrid();
+  }catch(err){ v.innerHTML = errorPanel(err); }
+}
+
+// Level 2: daftar ruas milik satu kabupaten/kota (drill-down dari level 1).
+async function viewRuasDalamKabupaten(kabupatenId){
+  const v = document.getElementById('view');
   v.innerHTML = `<div class="skel h-10 w-full mb-4"></div>${skeletonTable(9)}`;
   try{
-    const [ruas, kabupaten, kondisi] = await Promise.all([api.ruasList(), api.kabupaten(), api.kondisiTerkini()]);
-    state.ruasCache = ruas; state.kabupatenList = kabupaten;
+    const [ruasAll, kabupatenList, kondisi] = await Promise.all([api.ruasList(), api.kabupaten(), api.kondisiTerkini()]);
+    state.ruasCache = ruasAll; state.kabupatenList = kabupatenList;
+    const kab = kabupatenList.find(k=>k.id===kabupatenId);
+    if(!kab){ state.selectedKabupatenId = null; return viewRuasKabupatenIndex(); }
+    const ruas = ruasAll.filter(r=>r.kabupaten_id===kabupatenId);
     const worstByRuas = {};
     kondisi.forEach(row=>{ const cur = worstByRuas[row.ruas_id]; if(!cur || KONDISI_ORDER.indexOf(row.kondisi) < KONDISI_ORDER.indexOf(cur)) worstByRuas[row.ruas_id] = row.kondisi; });
 
     v.innerHTML = `
+    <button id="back-kab" type="button" class="flex items-center gap-1.5 text-[12.5px] font-semibold text-navy-700 hover:text-navy-900 mb-3">${icon('collapse','w-4 h-4')} Semua Kabupaten/Kota</button>
     <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
-      <div><h1 class="font-display font-extrabold text-2xl text-ink-900">Daftar Ruas Jalan</h1>
+      <div><h1 class="font-display font-extrabold text-2xl text-ink-900">${kab.nama}</h1>
       <p class="text-ink-500 text-[13.5px]">${ruas.length} ruas terdaftar</p></div>
       ${isEditor()?`<button id="btn-add-ruas" class="btn-accent">+ Tambah Ruas</button>`:''}
     </div>
     <div class="flex flex-wrap gap-3 mb-4">
       <input id="f-search" placeholder="Cari kode / nama ruas…" class="max-w-xs">
-      <select id="f-kabupaten" class="max-w-[220px]"><option value="">Semua Kabupaten/Kota</option>${kabupaten.map(k=>`<option value="${k.id}">${k.nama}</option>`).join('')}</select>
       <select id="f-status" class="max-w-[180px]"><option value="">Semua Status</option><option value="nasional">Nasional</option><option value="provinsi">Provinsi</option><option value="kabupaten">Kabupaten</option></select>
       <select id="f-fungsi" class="max-w-[180px]"><option value="">Semua Fungsi</option><option value="arteri">Arteri</option><option value="kolektor">Kolektor</option><option value="lokal">Lokal</option></select>
       <select id="f-kondisi" class="max-w-[180px]"><option value="">Semua Kondisi</option>${KONDISI_ORDER.map(k=>`<option value="${k}">${KONDISI_LABEL[k]}</option>`).join('')}</select>
@@ -2977,10 +3036,9 @@ async function viewRuas(){
       <div class="flex-1"></div>
       ${colPickerHtml('ruas')}
     </div>
-    <!-- Pengembangan #9: export gabungan (ruas + kegiatan penanganan + anggaran)
-         untuk satu kabupaten sekaligus, berguna untuk laporan ke kabupaten. -->
-    <div id="ruas-kab-export" class="hidden card p-3.5 mb-4 flex items-center justify-between flex-wrap gap-3 bg-[#F3F6FA]">
-      <div class="text-[13px] text-ink-600">Export gabungan ruas + kegiatan penanganan + anggaran untuk <span id="ruas-kab-export-nama" class="font-semibold text-ink-800"></span></div>
+    <!-- Pengembangan #9: export gabungan (ruas + kegiatan penanganan + anggaran) untuk kabupaten ini. -->
+    <div class="card p-3.5 mb-4 flex items-center justify-between flex-wrap gap-3 bg-[#F3F6FA]">
+      <div class="text-[13px] text-ink-600">Export gabungan ruas + kegiatan penanganan + anggaran untuk <span class="font-semibold text-ink-800">${kab.nama}</span></div>
       <div id="ruas-kab-export-btns"></div>
     </div>
     <div class="card overflow-x-auto">
@@ -2994,32 +3052,23 @@ async function viewRuas(){
     <div id="ruas-empty" class="hidden card p-8 text-center text-ink-400 text-[13.5px] mt-3">Tidak ada ruas yang cocok dengan filter.</div>
     <div id="ruas-loadmore" class="text-center mt-4"></div>`;
 
-    const kabExportBox = document.getElementById('ruas-kab-export');
+    document.getElementById('back-kab').addEventListener('click', ()=>{ state.selectedKabupatenId = null; renderShell(); });
     document.getElementById('ruas-kab-export-btns').innerHTML = exportButtons();
     wireExportButtons(document.getElementById('ruas-kab-export-btns'),
-      ()=>exportKabupatenGabungan(document.getElementById('f-kabupaten').value, kabupaten, 'excel'),
-      ()=>exportKabupatenGabungan(document.getElementById('f-kabupaten').value, kabupaten, 'pdf'));
-    function toggleKabExportBox(){
-      const kabId = document.getElementById('f-kabupaten').value;
-      const kab = kabupaten.find(k=>k.id===kabId);
-      kabExportBox.classList.toggle('hidden', !kab);
-      if(kab) document.getElementById('ruas-kab-export-nama').textContent = kab.nama;
-    }
-    // Pengembangan Tingkat 2 — Item #2: preset filter tersimpan (kombinasi
-    // filter yang sering dipakai, mis. kabupaten + status tertentu).
+      ()=>exportKabupatenGabungan(kabupatenId, kabupatenList, 'excel'),
+      ()=>exportKabupatenGabungan(kabupatenId, kabupatenList, 'pdf'));
+
+    // Pengembangan Tingkat 2 — Item #2: preset filter tersimpan.
     wireFilterPresets(document.getElementById('f-preset-wrap'), 'ruas', ()=>({
       search: document.getElementById('f-search').value,
-      kabupaten: document.getElementById('f-kabupaten').value,
       status: document.getElementById('f-status').value,
       fungsi: document.getElementById('f-fungsi').value,
       kondisi: document.getElementById('f-kondisi').value,
     }), (f)=>{
       document.getElementById('f-search').value = f.search||'';
-      document.getElementById('f-kabupaten').value = f.kabupaten||'';
       document.getElementById('f-status').value = f.status||'';
       document.getElementById('f-fungsi').value = f.fungsi||'';
       document.getElementById('f-kondisi').value = f.kondisi||'';
-      toggleKabExportBox();
       renderRowsResetPage();
     });
 
@@ -3029,13 +3078,11 @@ async function viewRuas(){
     const terapkanKolomRuas = setupColPicker('ruas', RUAS_KOLOM, pageState, ()=>renderRowsResetPage());
     function renderRows(){
       const q = document.getElementById('f-search').value.toLowerCase();
-      const kab = document.getElementById('f-kabupaten').value;
       const st = document.getElementById('f-status').value;
       const kd = document.getElementById('f-kondisi').value;
       const fg = document.getElementById('f-fungsi').value;
       let rows = ruas.filter(r=>{
         if(q && !(r.kode_ruas?.toLowerCase().includes(q) || r.nama_ruas?.toLowerCase().includes(q))) return false;
-        if(kab && r.kabupaten_id !== kab) return false;
         if(st && r.status_jalan !== st) return false;
         if(fg && r.fungsi_jalan !== fg) return false;
         if(kd && worstByRuas[r.id] !== kd) return false;
@@ -3077,31 +3124,28 @@ async function viewRuas(){
       tbody.querySelectorAll('tr').forEach(tr=>{
         tr.addEventListener('click', ()=>{ state.selectedRuasId = tr.dataset.id; renderShell(); });
         tr.querySelector('[data-act="edit"]')?.addEventListener('click', ()=>{
-          const r = ruas.find(x=>x.id===tr.dataset.id); openRuasFormModal(kabupaten, r);
+          const r = ruas.find(x=>x.id===tr.dataset.id); openRuasFormModal(kabupatenList, r, kabupatenId);
         });
         tr.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
           const r = ruas.find(x=>x.id===tr.dataset.id);
           if(!(await confirmDelete(`Hapus ruas "${r.nama_ruas}" beserta seluruh data terkait (segmen, survei, penanganan)?`))) return;
-          try{ await api.deleteRuas(r.id); viewRuas(); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
+          try{ await api.deleteRuas(r.id); viewRuasDalamKabupaten(kabupatenId); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
         });
       });
     }
     function renderRowsResetPage(){ pageState.shown = pageState.step; renderRows(); }
     document.getElementById('f-search').addEventListener('input', debounce(renderRowsResetPage, 300));
-    ['f-kabupaten','f-status','f-fungsi','f-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRowsResetPage));
-    document.getElementById('f-kabupaten').addEventListener('input', toggleKabExportBox);
+    ['f-status','f-fungsi','f-kondisi'].forEach(id=>document.getElementById(id).addEventListener('input', renderRowsResetPage));
     document.getElementById('f-reset').addEventListener('click', ()=>{
       document.getElementById('f-search').value='';
-      ['f-kabupaten','f-status','f-fungsi','f-kondisi'].forEach(id=>document.getElementById(id).value='');
-      toggleKabExportBox();
+      ['f-status','f-fungsi','f-kondisi'].forEach(id=>document.getElementById(id).value='');
       renderRowsResetPage();
     });
     document.getElementById('ruas-tbody').closest('table').querySelectorAll('thead th[data-sort-key]').forEach(th=>{
       wireSortableHeader(th, sortState, renderRows);
     });
-    toggleKabExportBox();
     renderRows();
-    if(isEditor()){ document.getElementById('btn-add-ruas').addEventListener('click', ()=>openRuasFormModal(kabupaten)); }
+    if(isEditor()){ document.getElementById('btn-add-ruas').addEventListener('click', ()=>openRuasFormModal(kabupatenList, null, kabupatenId)); }
   }catch(err){ v.innerHTML = errorPanel(err); }
 }
 
@@ -3319,11 +3363,12 @@ function openModal(innerHtml){
   document.body.appendChild(overlay);
   return overlay;
 }
-function openRuasFormModal(kabupaten, editData=null){
+function openRuasFormModal(kabupaten, editData=null, lockedKabupatenId=null){
   const isEdit = !!editData;
+  const kabTerkunci = lockedKabupatenId ? kabupaten.find(k=>k.id===lockedKabupatenId) : null;
   const overlay = openModal(`
     <button data-close class="absolute top-4 right-4 text-ink-400 hover:text-ink-900">✕</button>
-    <h3 class="font-display font-extrabold text-lg mb-4">${isEdit?'Ubah Ruas Jalan':'Tambah Ruas Jalan'}</h3>
+    <h3 class="font-display font-extrabold text-lg mb-4">${isEdit?'Ubah Ruas Jalan':'Tambah Ruas Jalan'}${kabTerkunci?` — ${kabTerkunci.nama}`:''}</h3>
     <form id="form-ruas" class="space-y-3">
       <div><label class="text-[12.5px] font-semibold text-ink-600">Kode Ruas *</label><input id="rj-kode" required placeholder="mis. 001.023" class="font-mono" value="${editData?.kode_ruas||''}"></div>
       <div><label class="text-[12.5px] font-semibold text-ink-600">Nama Ruas *</label><input id="rj-nama" required placeholder="mis. Kupang – Oesao" value="${editData?.nama_ruas||''}"></div>
@@ -3344,7 +3389,9 @@ function openRuasFormModal(kabupaten, editData=null){
         <div><label class="text-[12.5px] font-semibold text-ink-600">Panjang (km)</label><input id="rj-panjang" type="number" step="0.001" min="0" value="${editData?.panjang_km??''}"></div>
         <div><label class="text-[12.5px] font-semibold text-ink-600">Lebar Jalan (m)</label><input id="rj-lebar" type="number" step="0.01" min="0" placeholder="mis. 6" value="${editData?.lebar_jalan_m??''}"></div>
       </div>
-      <div><label class="text-[12.5px] font-semibold text-ink-600">Kabupaten/Kota *</label><select id="rj-kabupaten" required><option value="">Pilih…</option>${kabupaten.map(k=>`<option value="${k.id}" ${editData?.kabupaten_id===k.id?'selected':''}>${k.nama}</option>`).join('')}</select></div>
+      <div><label class="text-[12.5px] font-semibold text-ink-600">Kabupaten/Kota *</label>${kabTerkunci
+        ? `<input type="text" value="${kabTerkunci.nama}" disabled class="bg-[#F3F6FA] text-ink-500 cursor-not-allowed">`
+        : `<select id="rj-kabupaten" required><option value="">Pilih…</option>${kabupaten.map(k=>`<option value="${k.id}" ${editData?.kabupaten_id===k.id?'selected':''}>${k.nama}</option>`).join('')}</select>`}</div>
       <div class="card !border-dashed p-3">
         <div class="flex items-center justify-between mb-2">
           <label class="text-[12.5px] font-semibold text-ink-600">Titik Awal Ruas (Lat, Long)</label>
@@ -3386,7 +3433,7 @@ function openRuasFormModal(kabupaten, editData=null){
       fungsi_jalan: overlay.querySelector('#rj-fungsi').value || null,
       panjang_km: overlay.querySelector('#rj-panjang').value || null,
       lebar_jalan_m: overlay.querySelector('#rj-lebar').value || null,
-      kabupaten_id: overlay.querySelector('#rj-kabupaten').value,
+      kabupaten_id: lockedKabupatenId || overlay.querySelector('#rj-kabupaten')?.value,
       lat_awal: overlay.querySelector('#rj-lat-awal').value || null,
       long_awal: overlay.querySelector('#rj-long-awal').value || null,
       lat_akhir: overlay.querySelector('#rj-lat-akhir').value || null,
