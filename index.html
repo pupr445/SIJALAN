@@ -657,6 +657,10 @@ function isPenugas(){ return state.profile && ['admin','kepala_bidang','kepala_s
 function fmtNum(n, d=0, force=false){ if(n===null||n===undefined) return '—'; return Number(n).toLocaleString('id-ID',{minimumFractionDigits:force?d:0, maximumFractionDigits:d}); }
 function fmtRp(n){ if(n===null||n===undefined) return '—'; return 'Rp ' + Number(n).toLocaleString('id-ID',{maximumFractionDigits:0}); }
 function fmtDate(d){ if(!d) return '—'; return new Date(d).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}); }
+// Pengembangan: filter tahun untuk riwayat kegiatan penanganan (per ruas & menu global).
+// Tahun kegiatan diambil dari tanggal_penanganan, jatuh balik ke created_at kalau kosong.
+function tahunKegiatanItem(k){ const d = k.tanggal_penanganan || k.created_at; return d? new Date(d).getFullYear() : null; }
+function tahunKegiatanRuas(list){ return [...new Set(list.map(tahunKegiatanItem).filter(t=>t!=null))].sort((a,b)=>b-a); }
 
 // --- Pengembangan #4: highlight baris kadaluarsa/mendekati tenggat --------
 // tgl: string tanggal (yyyy-mm-dd). selesaiValues: daftar nilai status yang dianggap "sudah selesai"
@@ -3196,26 +3200,14 @@ async function viewRuasDetail(id){
           </tbody></table>` : `<p class="text-ink-400 text-[13px]">Belum ada data segmen untuk ruas ini.${isEditor()?' Klik "+ Tambah Segmen" di atas untuk mulai membagi ruas ini per STA.':''}</p>`}
         </div>
         <div class="card p-5">
-          <div class="flex items-center justify-between mb-3">
-            <h3 class="font-display font-bold text-[15px]">Riwayat Penanganan (${kegiatan.length})</h3>
-            <span class="text-[11px] text-ink-400">Terhubung langsung ke ruas ${ruas.kode_ruas}</span>
+          <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <h3 class="font-display font-bold text-[15px]">Riwayat Penanganan (<span id="kegiatan-riwayat-count">${kegiatan.length}</span>)</h3>
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] text-ink-400 no-print">Terhubung langsung ke ruas ${ruas.kode_ruas}</span>
+              ${kegiatan.length? `<select id="kegiatan-tahun-filter" class="!py-1 !px-2 text-[12.5px] max-w-[140px] no-print"><option value="">Semua Tahun</option>${tahunKegiatanRuas(kegiatan).map(t=>`<option value="${t}">${t}</option>`).join('')}</select>` : ''}
+            </div>
           </div>
-          <div id="kegiatan-list">${kegiatan.length? kegiatan.map(r=>`
-            <div class="border-b border-line last:border-0 py-3 flex items-start justify-between gap-3 row-hover cursor-pointer" data-kid="${r.id}">
-              <div class="flex items-start gap-3">
-                ${fotoThumbHtml(r.foto_awal_path || r.foto_akhir_path)}
-                <div>
-                  <div class="font-semibold text-[13.5px] capitalize">${(r.jenis_penanganan||'—').replaceAll('_',' ')} <span class="text-ink-400 font-normal">· TA ${new Date(r.tanggal_penanganan||r.created_at).getFullYear()}</span></div>
-                  <div class="text-[12.5px] text-ink-500 mt-0.5">STA ${fmtNum(r.sta_awal,3)}–${fmtNum(r.sta_akhir,3)} · Mulai ${fmtDate(r.tanggal_penanganan)}${r.tanggal_selesai? ' · Selesai '+fmtDate(r.tanggal_selesai) : ''}</div>
-                  ${r.sub_kegiatan? `<div class="text-[12px] text-ink-400 mt-0.5">${r.sub_kegiatan}</div>`:''}
-                  ${r.kontraktor_pelaksana? `<div class="text-[12px] text-ink-400 mt-0.5">Pelaksana: ${r.kontraktor_pelaksana} ${r.biaya? '· '+fmtRp(r.biaya):''}</div>`:''}
-                  ${r.kejadian_bencana_id? `<div class="text-[11.5px] text-[var(--bad)] mt-0.5">⚠ Menangani kejadian: ${(r.bencana_jenis_kejadian||'—').replaceAll('_',' ')} · ${fmtDate(r.bencana_tanggal_kejadian)}</div>`:''}
-                </div>
-              </div>
-              <div class="flex items-center gap-2 shrink-0">
-                ${isEditor()? actionBtns({onDetail:true, onEdit:true, onDelete:isAdmin()}) : ''}
-              </div>
-            </div>`).join('') : `<p class="text-ink-400 text-[13px]">Belum ada kegiatan penanganan untuk ruas ini.</p>`}</div>
+          <div id="kegiatan-list"></div>
         </div>
         <div class="card p-5">
           <h3 class="font-display font-bold text-[15px] mb-3">Riwayat Survei Kondisi (${survei.length})</h3>
@@ -3295,7 +3287,6 @@ async function viewRuasDetail(id){
     document.getElementById('back-ruas').addEventListener('click', ()=>{ state.selectedRuasId=null; renderShell(); });
     document.getElementById('btn-export-laporan-ruas').addEventListener('click', ()=>exportLaporanRuasPdf(ruas, segmen, kegiatan, survei, anggaran, bencana));
     document.getElementById('btn-cetak-ruas').addEventListener('click', ()=>cetakHalaman());
-    hydrateFotoThumbs(document.getElementById('kegiatan-list'));
     hydrateFotoThumbs(document.getElementById('survei-list'));
     if(isEditor()){
       document.getElementById('btn-add-segmen')?.addEventListener('click', ()=>openSegmenFormModal(ruas, null, ()=>viewRuasDetail(id)));
@@ -3315,20 +3306,46 @@ async function viewRuasDetail(id){
         try{ await api.deleteSegmen(s.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
       });
     });
-    // Kegiatan penanganan actions
-    document.querySelectorAll('#kegiatan-list [data-kid]').forEach(row=>{
-      const kg = kegiatan.find(k=>k.id===row.dataset.kid);
-      row.addEventListener('click', ()=>openKegiatanDetailModal(kg));
-      row.querySelector('[data-act="detail"]')?.addEventListener('click', ()=>openKegiatanDetailModal(kg));
-      row.querySelector('[data-act="edit"]')?.addEventListener('click', async ()=>{
-        try{ const full = await api.penangananById(kg.id); openKegiatanFormModal(ruasAll, ruas, {...kg, ...full}, ()=>viewRuasDetail(id)); }
-        catch(err){ alert('Gagal memuat data kegiatan: '+terjemahkanErrorDb(err)); }
+    // Kegiatan penanganan actions — render ulang tiap kali filter tahun berubah.
+    function renderKegiatanRiwayat(){
+      const tahunVal = document.getElementById('kegiatan-tahun-filter')?.value || '';
+      const rows = tahunVal? kegiatan.filter(r=>String(tahunKegiatanItem(r))===tahunVal) : kegiatan;
+      const list = document.getElementById('kegiatan-list');
+      list.innerHTML = rows.length? rows.map(r=>`
+        <div class="border-b border-line last:border-0 py-3 flex items-start justify-between gap-3 row-hover cursor-pointer" data-kid="${r.id}">
+          <div class="flex items-start gap-3">
+            ${fotoThumbHtml(r.foto_awal_path || r.foto_akhir_path)}
+            <div>
+              <div class="font-semibold text-[13.5px] capitalize">${(r.jenis_penanganan||'—').replaceAll('_',' ')} <span class="text-ink-400 font-normal">· TA ${tahunKegiatanItem(r)??'—'}</span></div>
+              <div class="text-[12.5px] text-ink-500 mt-0.5">STA ${fmtNum(r.sta_awal,3)}–${fmtNum(r.sta_akhir,3)} · Mulai ${fmtDate(r.tanggal_penanganan)}${r.tanggal_selesai? ' · Selesai '+fmtDate(r.tanggal_selesai) : ''}</div>
+              ${r.sub_kegiatan? `<div class="text-[12px] text-ink-400 mt-0.5">${r.sub_kegiatan}</div>`:''}
+              ${r.kontraktor_pelaksana? `<div class="text-[12px] text-ink-400 mt-0.5">Pelaksana: ${r.kontraktor_pelaksana} ${r.biaya? '· '+fmtRp(r.biaya):''}</div>`:''}
+              ${r.kejadian_bencana_id? `<div class="text-[11.5px] text-[var(--bad)] mt-0.5">⚠ Menangani kejadian: ${(r.bencana_jenis_kejadian||'—').replaceAll('_',' ')} · ${fmtDate(r.bencana_tanggal_kejadian)}</div>`:''}
+            </div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            ${isEditor()? actionBtns({onDetail:true, onEdit:true, onDelete:isAdmin()}) : ''}
+          </div>
+        </div>`).join('') : `<p class="text-ink-400 text-[13px]">${tahunVal? `Tidak ada kegiatan penanganan pada tahun ${tahunVal} untuk ruas ini.` : 'Belum ada kegiatan penanganan untuk ruas ini.'}</p>`;
+      const countEl = document.getElementById('kegiatan-riwayat-count');
+      if(countEl) countEl.textContent = rows.length;
+      hydrateFotoThumbs(list);
+      document.querySelectorAll('#kegiatan-list [data-kid]').forEach(row=>{
+        const kg = kegiatan.find(k=>k.id===row.dataset.kid);
+        row.addEventListener('click', ()=>openKegiatanDetailModal(kg));
+        row.querySelector('[data-act="detail"]')?.addEventListener('click', ()=>openKegiatanDetailModal(kg));
+        row.querySelector('[data-act="edit"]')?.addEventListener('click', async ()=>{
+          try{ const full = await api.penangananById(kg.id); openKegiatanFormModal(ruasAll, ruas, {...kg, ...full}, ()=>viewRuasDetail(id)); }
+          catch(err){ alert('Gagal memuat data kegiatan: '+terjemahkanErrorDb(err)); }
+        });
+        row.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
+          if(!(await confirmDelete('Hapus kegiatan penanganan ini beserta kelengkapan dokumennya?'))) return;
+          try{ await api.deletePenanganan(kg.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
+        });
       });
-      row.querySelector('[data-act="delete"]')?.addEventListener('click', async ()=>{
-        if(!(await confirmDelete('Hapus kegiatan penanganan ini beserta kelengkapan dokumennya?'))) return;
-        try{ await api.deletePenanganan(kg.id); viewRuasDetail(id); }catch(err){ alert('Gagal menghapus: '+terjemahkanErrorDb(err)); }
-      });
-    });
+    }
+    renderKegiatanRiwayat();
+    document.getElementById('kegiatan-tahun-filter')?.addEventListener('change', renderKegiatanRiwayat);
     // Survei kondisi actions
     document.querySelectorAll('#survei-list [data-sid]').forEach(row=>{
       const sv = survei.find(s=>s.id===row.dataset.sid);
@@ -4759,6 +4776,7 @@ async function viewKegiatan(){
       <select id="fk-jenis" class="max-w-[200px]"><option value="">Semua Jenis</option>${JENIS_PENANGANAN_OPT.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
       <select id="fk-status" class="max-w-[180px]"><option value="">Semua Status</option>${STATUS_PEKERJAAN_OPT.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
       <select id="fk-sumber" class="max-w-[190px]"><option value="">Semua Sumber Dana</option>${SUMBER_DANA_OPT.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
+      <select id="fk-tahun" class="max-w-[140px]"><option value="">Semua Tahun</option>${tahunKegiatanRuas(kegiatan).map(t=>`<option value="${t}">${t}</option>`).join('')}</select>
       <div class="flex items-center gap-1.5 text-[12.5px] text-ink-500">
         <span>Mulai</span><input id="fk-tgl-dari" type="date" class="max-w-[150px]">
         <span>s/d</span><input id="fk-tgl-sampai" type="date" class="max-w-[150px]">
@@ -4788,6 +4806,7 @@ async function viewKegiatan(){
       const jenis = document.getElementById('fk-jenis').value;
       const status = document.getElementById('fk-status').value;
       const sumber = document.getElementById('fk-sumber').value;
+      const tahun = document.getElementById('fk-tahun').value;
       const tglDari = document.getElementById('fk-tgl-dari').value;
       const tglSampai = document.getElementById('fk-tgl-sampai').value;
       let rows = kegiatan.filter(k=>{
@@ -4796,6 +4815,7 @@ async function viewKegiatan(){
         if(jenis && k.jenis_penanganan!==jenis) return false;
         if(status && k.status_pekerjaan!==status) return false;
         if(sumber && k.sumber_dana!==sumber) return false;
+        if(tahun && String(tahunKegiatanItem(k))!==tahun) return false;
         if(tglDari && (!k.tanggal_penanganan || k.tanggal_penanganan < tglDari)) return false;
         if(tglSampai && (!k.tanggal_penanganan || k.tanggal_penanganan > tglSampai)) return false;
         return true;
@@ -4849,9 +4869,9 @@ async function viewKegiatan(){
     }
     function renderRowsResetPage(){ pageState.shown = pageState.step; renderRows(); }
     document.getElementById('fk-search').addEventListener('input', debounce(renderRowsResetPage, 300));
-    ['fk-kabupaten','fk-jenis','fk-status','fk-sumber','fk-tgl-dari','fk-tgl-sampai'].forEach(id=>document.getElementById(id).addEventListener('input', renderRowsResetPage));
+    ['fk-kabupaten','fk-jenis','fk-status','fk-sumber','fk-tahun','fk-tgl-dari','fk-tgl-sampai'].forEach(id=>document.getElementById(id).addEventListener('input', renderRowsResetPage));
     document.getElementById('fk-reset').addEventListener('click', ()=>{
-      ['fk-search','fk-kabupaten','fk-jenis','fk-status','fk-sumber','fk-tgl-dari','fk-tgl-sampai'].forEach(id=>document.getElementById(id).value='');
+      ['fk-search','fk-kabupaten','fk-jenis','fk-status','fk-sumber','fk-tahun','fk-tgl-dari','fk-tgl-sampai'].forEach(id=>document.getElementById(id).value='');
       renderRowsResetPage();
     });
     document.getElementById('kegiatan-tbody').closest('table').querySelectorAll('thead th[data-sort-key]').forEach(th=>{
